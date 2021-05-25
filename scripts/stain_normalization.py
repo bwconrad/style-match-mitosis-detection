@@ -35,7 +35,7 @@ def normalizeStaining(img, saveFile=None, Io=240, alpha=1, beta=0.15):
     h, w, c = img.shape
 
     # reshape image
-    img = img.reshape((-1, 3))
+    img = img.reshape((-1, c))
 
     # calculate optical density
     OD = -np.log((img.astype(float) + 1) / Io)
@@ -123,7 +123,7 @@ if __name__ == "__main__":
     for file in files:
         input_path = os.path.join(args.input, file)
         output_path = os.path.join(args.output, file)
-        img = np.array(Image.open(input_path))
+        img = np.array(Image.open(input_path).convert("RGB"))
 
         print(f"Processing {input_path}...")
         normalizeStaining(
