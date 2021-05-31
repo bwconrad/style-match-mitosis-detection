@@ -6,13 +6,17 @@ from torch.optim import lr_scheduler, Adam
 # from torchmetrics import SSIM
 from collections import OrderedDict
 
-from .network import VGGEncoder, AdaIn, Decoder
+from .network import AdaInNetwork
 from .loss import ContentLoss, StyleLoss
 
 
 class AdaInModel(pl.LightningModule):
     def __init__(
-        self, lr: float = 1e-4, weight_content: float = 1.0, weight_style: float = 1.0
+        self,
+        lr: float = 1e-4,
+        weight_content: float = 1.0,
+        weight_style: float = 1.0,
+        use_bfg: bool = False,
     ):
         """Arbitrary style transfer model
 
@@ -20,6 +24,7 @@ class AdaInModel(pl.LightningModule):
             lr: Learning rate
             weight_content: Weight for content loss
             weight_style: Weight for style loss
+            use_bfg: use bottleneck feature aggregation
         """
         super().__init__()
         self.save_hyperparameters()
@@ -28,48 +33,37 @@ class AdaInModel(pl.LightningModule):
         self.lr = lr
         self.weight_content = weight_content
         self.weight_style = weight_style
+        self.use_bfg = use_bfg
 
         # Networks
-        self.encoder = VGGEncoder()
-        self.ada_in = AdaIn()
-        self.decoder = Decoder()
+        self.net = AdaInNetwork(use_bfg=use_bfg)
 
         # Losses
         self.content_loss = ContentLoss()
         self.style_loss = StyleLoss(use_statistics=True)
 
         # Metrics
-        # self.train_ssim = SSIM()
         # self.val_ssim = SSIM()
 
     def forward(self, c, s, alpha=1.0):
-        # Pass content and style images through encoder
-        f_c = self.encoder(c)
-        f_s = self.encoder(s, return_all=True)
-
-        # Apply AdaIn
-        t = self.ada_in(f_c, f_s[-1])
-        t = alpha * t + (1 - alpha) * f_c
-
-        # Decode back
-        g_t = self.decoder(t)
-
-        return g_t, t, f_c, f_s
+        return self.net(c, s, alpha)
 
     def training_step(self, batch, _):
         img_c = batch["content"]
         img_s = batch["style"]
 
         # Pass through model
-        g_t, t, _, f_s = self(img_c, img_s)
+        g_t, t, f_s = self(img_c, img_s)
 
         # Calculate loss
-        f_g_t = self.encoder(g_t, return_all=True)
-        loss_c = self.content_loss(f_g_t[-1], t)
+        f_g_t = self.net.encoder(g_t, return_all=True)
+        if self.use_bfg:
+            f_g_t_cat = self.net.bfg(f_g_t)
+            loss_c = self.content_loss(f_g_t_cat, t)
+        else:
+            loss_c = self.content_loss(f_g_t[-1], t)
         loss_s = self.style_loss(f_g_t, f_s)
         loss = self.weight_content * loss_c + self.weight_style * loss_s
-
-        # ssim = self.train_ssim(img_c, g_t.float())
 
         self.log("train_loss", loss)
         self.log("train_content_loss", loss_c, prog_bar=True)
@@ -83,11 +77,15 @@ class AdaInModel(pl.LightningModule):
         img_s = batch["style"]
 
         # Pass through model
-        g_t, t, _, f_s = self(img_c, img_s)
+        g_t, t, f_s = self(img_c, img_s)
 
         # Calculate loss
-        f_g_t = self.encoder(g_t, return_all=True)
-        loss_c = self.content_loss(f_g_t[-1], t)
+        f_g_t = self.net.encoder(g_t, return_all=True)
+        if self.use_bfg:
+            f_g_t_cat = self.net.bfg(f_g_t)
+            loss_c = self.content_loss(f_g_t_cat, t)
+        else:
+            loss_c = self.content_loss(f_g_t[-1], t)
         loss_s = self.style_loss(f_g_t, f_s)
         loss = self.weight_content * loss_c + self.weight_style * loss_s
 
@@ -108,7 +106,7 @@ class AdaInModel(pl.LightningModule):
 
     def configure_optimizers(self):
         optimizer = Adam(
-            self.decoder.parameters(),
+            self.net.parameters(),
             lr=self.lr,
         )
         scheduler = {
