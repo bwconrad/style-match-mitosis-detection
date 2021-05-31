@@ -17,6 +17,7 @@ class AdaInModel(pl.LightningModule):
         weight_content: float = 1.0,
         weight_style: float = 1.0,
         use_bfg: bool = False,
+        use_skip: bool = False,
     ):
         """Arbitrary style transfer model
 
@@ -24,7 +25,8 @@ class AdaInModel(pl.LightningModule):
             lr: Learning rate
             weight_content: Weight for content loss
             weight_style: Weight for style loss
-            use_bfg: use bottleneck feature aggregation
+            use_bfg: Use bottleneck feature aggregation
+            use_skip: Use unet skip connections
         """
         super().__init__()
         self.save_hyperparameters()
@@ -34,9 +36,10 @@ class AdaInModel(pl.LightningModule):
         self.weight_content = weight_content
         self.weight_style = weight_style
         self.use_bfg = use_bfg
+        self.use_skip = use_skip
 
-        # Networks
-        self.net = AdaInNetwork(use_bfg=use_bfg)
+        # Network
+        self.net = AdaInNetwork(use_bfg=use_bfg, use_skip=use_skip)
 
         # Losses
         self.content_loss = ContentLoss()

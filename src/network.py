@@ -39,6 +39,29 @@ class AdaIn(nn.Module):
         return c_norm
 
 
+class BFG(nn.Module):
+    def __init__(self):
+        super().__init__()
+        n = 4
+
+        self.pool_layers = nn.ModuleList([])
+        for i in range(1, n):
+            self.pool_layers.append(nn.MaxPool2d(2 ** i, 2 ** i))
+
+    def forward(self, features):
+        features = list(reversed(features))
+
+        # Downscale all features to same size
+        scaled = [features[0]]
+        for f, pool in zip(features[1:], self.pool_layers):
+            scaled.append(pool(f))
+
+        # Concat features
+        out = torch.cat(scaled, dim=1)
+
+        return out
+
+
 class VGGEncoder(nn.Module):
     def __init__(self):
         super().__init__()
@@ -88,40 +111,77 @@ class Decoder(nn.Module):
         return self.decoder(x)
 
 
-class BFG(nn.Module):
-    def __init__(self):
+class UNetDecoder(nn.Module):
+    def __init__(self, in_ch=512):
         super().__init__()
-        n = 4
 
-        self.pool_layers = nn.ModuleList([])
-        for i in range(1, n):
-            self.pool_layers.append(nn.MaxPool2d(2 ** i, 2 ** i))
+        # Decoder blocks
+        self.d1 = nn.Sequential(
+            ConvBlock(in_ch, 256), nn.Upsample(scale_factor=2, mode="nearest")
+        )
+        self.d2 = nn.Sequential(
+            ConvBlock(512, 256),
+            ConvBlock(256, 256),
+            ConvBlock(256, 256),
+            ConvBlock(256, 128),
+            nn.Upsample(scale_factor=2, mode="nearest"),
+        )
+        self.d3 = nn.Sequential(
+            ConvBlock(256, 128),
+            ConvBlock(128, 64),
+            nn.Upsample(scale_factor=2, mode="nearest"),
+        )
+        self.d4 = nn.Sequential(ConvBlock(128, 64), ConvBlock(64, 3, use_relu=False))
 
-    def forward(self, features):
-        features.reverse()
+        # Skip connections
+        self.in1 = nn.InstanceNorm2d(256)
+        self.ada_in1 = AdaIn()
+        self.in2 = nn.InstanceNorm2d(128)
+        self.ada_in2 = AdaIn()
+        self.in3 = nn.InstanceNorm2d(64)
+        self.ada_in3 = AdaIn()
 
-        # Downscale all features to same size
-        scaled = [features[0]]
-        for f, pool in zip(features[1:], self.pool_layers):
-            scaled.append(pool(f))
+    def forward(self, x, c, s):
+        c4, c3, c2, _ = c
+        s4, s3, s2, _ = s
 
-        # Concat features
-        out = torch.cat(scaled, dim=1)
+        d1 = self.d1(x)
 
-        return out
+        skip1 = self.ada_in1(self.in1(c2), s2)
+        d1 = torch.cat([d1, skip1], dim=1)
+        d2 = self.d2(d1)
+
+        skip2 = self.ada_in2(self.in2(c3), s3)
+        d2 = torch.cat([d2, skip2], dim=1)
+        d3 = self.d3(d2)
+
+        skip3 = self.ada_in3(self.in3(c4), s4)
+        d3 = torch.cat([d3, skip3], dim=1)
+        d4 = self.d4(d3)
+
+        return d4
 
 
 class AdaInNetwork(nn.Module):
-    def __init__(self, use_bfg=False):
+    def __init__(self, use_bfg=False, use_skip=False):
         super().__init__()
         self.use_bfg = use_bfg
+        self.use_skip = use_skip
 
+        # Encoder
         self.encoder = VGGEncoder()
+
+        # Bottleneck
         if use_bfg:
             self.bfg = BFG()
             self.conv = nn.Conv2d(960, 512, kernel_size=1)
         self.ada_in = AdaIn()
-        self.decoder = Decoder()
+
+        # Decoder
+        if use_skip:
+            self.decoder = UNetDecoder()
+        else:
+            self.decoder = Decoder()
 
     def forward(self, c, s, alpha=1.0):
         # Encode content and style images
@@ -141,7 +201,10 @@ class AdaInNetwork(nn.Module):
             t_in = t
 
         # Decode stylized image
-        g_t = self.decoder(t_in)
+        if self.use_skip:
+            g_t = self.decoder(t_in, f_c, f_s)
+        else:
+            g_t = self.decoder(t_in)
 
         return g_t, t, f_s
 
@@ -152,14 +215,14 @@ if __name__ == "__main__":
     # b = BFG()
     # i = AdaIn()
     # d = Decoder()
+    # d2 = UNetDecoder(960)
     # y = e(x, return_all=True)
-    # y = b(y)
-    # t = i(y, y)
+    # r = b(y)
+    # t = i(r, r)
     # out = d(t)
-    # print(y.size())
-    # print(t.size())
-    # print(out.size())
-    n = AdaInNetwork(use_bfg=True)
+    # out = d2(t, y, y)
+    n = AdaInNetwork(use_bfg=True, use_skip=False)
+    print(n)
     out = n(x, x)
     print(out[0].size())
     print(out[1].size())
