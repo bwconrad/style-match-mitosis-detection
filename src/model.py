@@ -104,7 +104,6 @@ class AdaInModel(pl.LightningModule):
     def validation_epoch_end(self, outputs):
         imgs = torch.cat([x["val_sample"] for x in outputs], 0)
         grid = make_grid(imgs, nrow=3, normalize=True)
-        print("here")
         self.logger.experiment.add_image("val_samples", grid, self.global_step)
 
     def configure_optimizers(self):

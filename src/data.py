@@ -1,6 +1,5 @@
 import pytorch_lightning as pl
 from pytorch_lightning.trainer.supporters import CombinedLoader
-import torch
 import torch.utils.data as data
 from torchvision import transforms
 from torch.utils.data import DataLoader
