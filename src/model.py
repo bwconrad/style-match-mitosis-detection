@@ -3,7 +3,7 @@ import pytorch_lightning as pl
 from torchvision.utils import make_grid, save_image
 from torch.optim import lr_scheduler, Adam
 
-# from torchmetrics import SSIM
+from torchmetrics import SSIM
 from collections import OrderedDict
 
 from .network import AdaInNetwork
@@ -46,7 +46,7 @@ class AdaInModel(pl.LightningModule):
         self.style_loss = StyleLoss(use_statistics=True)
 
         # Metrics
-        # self.val_ssim = SSIM()
+        self.test_ssim = SSIM()
 
     def forward(self, c, s, alpha=1.0):
         return self.net(c, s, alpha)
@@ -105,6 +105,30 @@ class AdaInModel(pl.LightningModule):
         imgs = torch.cat([x["val_sample"] for x in outputs], 0)
         grid = make_grid(imgs, nrow=3, normalize=True)
         self.logger.experiment.add_image("val_samples", grid, self.global_step)
+
+    def test_step(self, batch, batch_idx):
+        img_c = batch["content"]
+        img_s = batch["style"]
+
+        # Pass through model
+        g_t, t, f_s = self(img_c, img_s)
+
+        # Calculate loss
+        f_g_t = self.net.encoder(g_t, return_all=True)
+        if self.use_bfg:
+            f_g_t_cat = self.net.bfg(f_g_t)
+            loss_c = self.content_loss(f_g_t_cat, t)
+        else:
+            loss_c = self.content_loss(f_g_t[-1], t)
+        loss_s = self.style_loss(f_g_t, f_s)
+        loss = self.weight_content * loss_c + self.weight_style * loss_s
+
+        ssim = self.test_ssim(img_c, g_t.float())
+
+        self.log("test_loss", loss)
+        self.log("test_content_loss", loss_c)
+        self.log("test_style_loss", loss_s)
+        self.log("test_ssim", ssim)
 
     def configure_optimizers(self):
         optimizer = Adam(

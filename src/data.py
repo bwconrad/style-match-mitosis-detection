@@ -93,6 +93,22 @@ class ContentStyleDataModule(pl.LightningDataModule):
                 [n_train_style, n_train_style + self.n_val],
                 self.val_transforms,
             )
+        elif stage == "test":
+            # Calculate number of images
+            n_content = len(os.listdir(self.content_path)) - self.n_val
+            n_style = len(os.listdir(self.style_path)) - self.n_val
+
+            # Load content and style images
+            self.content_test = SimpleDataset(
+                self.content_path,
+                [n_content, n_content + self.n_val],
+                self.val_transforms,
+            )
+            self.style_test = SimpleDataset(
+                self.style_path,
+                [n_style, n_style + self.n_val],
+                self.val_transforms,
+            )
 
     def train_dataloader(self):
         return {
@@ -123,6 +139,26 @@ class ContentStyleDataModule(pl.LightningDataModule):
             ),
             "style": DataLoader(
                 self.style_val,
+                batch_size=1,
+                shuffle=False,
+                num_workers=self.workers,
+                pin_memory=True,
+            ),
+        }
+
+        return CombinedLoader(loaders, "max_size_cycle")
+
+    def test_dataloader(self):
+        loaders = {
+            "content": DataLoader(
+                self.content_test,
+                batch_size=1,
+                shuffle=False,
+                num_workers=self.workers,
+                pin_memory=True,
+            ),
+            "style": DataLoader(
+                self.style_test,
                 batch_size=1,
                 shuffle=False,
                 num_workers=self.workers,
