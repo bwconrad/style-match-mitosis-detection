@@ -1,13 +1,13 @@
-import torch
-import pytorch_lightning as pl
-from torchvision.utils import make_grid, save_image
-from torch.optim import lr_scheduler, Adam
-
-from torchmetrics import SSIM
 from collections import OrderedDict
 
-from .network import AdaInNetwork
+import pytorch_lightning as pl
+import torch
+from torch.optim import Adam, lr_scheduler
+from torchmetrics import SSIM
+from torchvision.utils import make_grid, save_image
+
 from .loss import ContentLoss, StyleLoss
+from .network import AdaInNetwork
 
 
 class AdaInModel(pl.LightningModule):
@@ -49,7 +49,7 @@ class AdaInModel(pl.LightningModule):
         self.test_ssim = SSIM()
 
     def forward(self, c, s, alpha=1.0):
-        return self.net(c, s, alpha)
+        return self.net(c, s, alpha=alpha)
 
     def training_step(self, batch, _):
         img_c = batch["content"]
@@ -106,7 +106,7 @@ class AdaInModel(pl.LightningModule):
         grid = make_grid(imgs, nrow=3, normalize=True)
         self.logger.experiment.add_image("val_samples", grid, self.global_step)
 
-    def test_step(self, batch, batch_idx):
+    def test_step(self, batch, _):
         img_c = batch["content"]
         img_s = batch["style"]
 

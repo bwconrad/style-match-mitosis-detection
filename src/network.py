@@ -183,10 +183,18 @@ class AdaInNetwork(nn.Module):
         else:
             self.decoder = Decoder()
 
-    def forward(self, c, s, alpha=1.0):
+    def forward(self, c, s=None, f_s=None, alpha=1.0):
         # Encode content and style images
         f_c = self.encoder(c, return_all=True)
-        f_s = self.encoder(s, return_all=True)
+        if s is not None:
+            f_s = self.encoder(s, return_all=True)
+        else:
+            # Use inputted style features
+            assert f_s is not None
+            if len(f_s[0].size()) == 3:
+                for i in range(len(f_s)):
+                    # Repeat along batch dimension
+                    f_s[i] = f_s[i].unsqueeze(0).repeat(c.size()[0], 1, 1, 1)
 
         # Bottleneck
         if self.use_bfg:
@@ -221,8 +229,9 @@ if __name__ == "__main__":
     # t = i(r, r)
     # out = d(t)
     # out = d2(t, y, y)
-    n = AdaInNetwork(use_bfg=True, use_skip=False)
-    print(n)
+    n = AdaInNetwork(use_bfg=True, use_skip=True)
+    # f_s = torch.load("data/scanner4_features.pt")
+    # out = n(x, f_s=f_s)
     out = n(x, x)
     print(out[0].size())
     print(out[1].size())
