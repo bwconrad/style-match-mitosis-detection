@@ -68,6 +68,7 @@ class AdaInModel(pl.LightningModule):
         loss_s = self.style_loss(f_g_t, f_s)
         loss = self.weight_content * loss_c + self.weight_style * loss_s
 
+        # Log
         self.log("train_loss", loss)
         self.log("train_content_loss", loss_c, prog_bar=True)
         self.log("train_style_loss", loss_s, prog_bar=True)
@@ -92,12 +93,10 @@ class AdaInModel(pl.LightningModule):
         loss_s = self.style_loss(f_g_t, f_s)
         loss = self.weight_content * loss_c + self.weight_style * loss_s
 
-        # ssim = self.val_ssim(img_c, g_t.float())
-
+        # Log
         self.log("val_loss", loss)
         self.log("val_content_loss", loss_c)
         self.log("val_style_loss", loss_s)
-        # self.log("val_ssim", ssim)
 
         return OrderedDict({"val_sample": torch.stack([img_c[0], img_s[0], g_t[0]])})
 
@@ -125,6 +124,7 @@ class AdaInModel(pl.LightningModule):
 
         ssim = self.test_ssim(img_c, g_t.float())
 
+        # Log
         self.log("test_loss", loss)
         self.log("test_content_loss", loss_c)
         self.log("test_style_loss", loss_s)

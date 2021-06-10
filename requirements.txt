@@ -5,3 +5,5 @@ torchvision==0.9.1
 Pillow==8.2.0
 torchmetrics==0.3.1
 jsonargparse[signatures]
+ipywidgets==7.6.2
+matplotlib==3.2.1
