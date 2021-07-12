@@ -1,11 +1,12 @@
-import pytorch_lightning as pl
-from pytorch_lightning.trainer.supporters import CombinedLoader
-import torch.utils.data as data
-from torchvision import transforms
-from torch.utils.data import DataLoader
-from PIL import Image
 import os
 from typing import Callable, List
+
+import pytorch_lightning as pl
+import torch.utils.data as data
+from PIL import Image
+from pytorch_lightning.trainer.supporters import CombinedLoader
+from torch.utils.data import DataLoader
+from torchvision import transforms
 
 
 class ContentStyleDataModule(pl.LightningDataModule):

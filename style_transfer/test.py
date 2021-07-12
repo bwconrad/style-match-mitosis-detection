@@ -1,6 +1,7 @@
+from argparse import Namespace
+
 import pytorch_lightning as pl
 from pytorch_lightning.utilities.cli import LightningArgumentParser
-from argparse import Namespace
 
 from src.data import ContentStyleDataModule
 from src.model import AdaInModel
