@@ -3,6 +3,48 @@ from collections import Counter
 import torch
 
 
+def iou_and_acc(pred_boxes, true_boxes, iou_threshold=0.5, box_format="corners"):
+    ious = []
+    corrects = 0
+    matches = 0
+    for gt in true_boxes:
+        # Find best predicted IOU for current gt box
+        best_iou = 0
+        best_pred = None
+        for pred in pred_boxes:
+            iou = intersection_over_union(
+                torch.tensor(pred[3:]),
+                torch.tensor(gt[3:]),
+                box_format=box_format,
+            )
+
+            if iou >= best_iou:
+                best_iou = iou
+                best_pred = pred
+
+        ious.append(best_iou[0])
+
+        # If best predicted box is above threshold check if correct class
+        if best_iou >= iou_threshold:
+            matches += 1
+            if gt[1] == best_pred[1]:
+                corrects += 1
+
+    # Average IOU
+    if len(ious) > 0:
+        avg_iou = sum(ious) / len(true_boxes)
+    else:
+        avg_iou = torch.tensor(0.0)
+
+    # Label accuracy
+    if matches > 0:
+        acc = torch.tensor(corrects / matches)
+    else:
+        acc = torch.tensor(0.0)
+
+    return avg_iou, acc
+
+
 def mean_average_precision(
     pred_boxes, true_boxes, iou_threshold=0.5, box_format="corners", num_classes=2
 ):
@@ -159,3 +201,11 @@ def intersection_over_union(boxes_preds, boxes_labels, box_format="midpoint"):
     box2_area = abs((box2_x2 - box2_x1) * (box2_y2 - box2_y1))
 
     return intersection / (box1_area + box2_area - intersection + 1e-6)
+
+
+if __name__ == "__main__":
+    # [train_idx, class_prediction, prob_score, x1, y1, x2, y2]
+
+    gt = [[1, 1, 1, 100, 100, 300, 200], [1, 2, 1, 500, 500, 1000, 1000]]
+    pred = [[1, 0, 1, 100, 100, 200, 200], [1, 1, 1, 100, 100, 150, 200]]
+    print(iou_and_acc(pred, gt))
