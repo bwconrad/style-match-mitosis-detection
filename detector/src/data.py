@@ -9,6 +9,8 @@ import pytorch_lightning as pl
 import torch
 import torch.utils.data as data
 from albumentations.pytorch import ToTensorV2
+from PIL import Image
+from pytorch_lightning.trainer.supporters import CombinedLoader
 from torch.utils.data import DataLoader
 from torchvision import transforms
 
@@ -22,6 +24,8 @@ class MidogDataModule(pl.LightningDataModule):
         ann_path: str = "data/MIDOG.json",
         train_scanner: int = 1,
         val_scanner: int = 1,
+        test_scanner: int = 1,
+        style_scanner: int = None,
         n_train_samples: int = 1500,
         n_val_samples: int = 500,
         resize_size: str = 0,
@@ -37,6 +41,8 @@ class MidogDataModule(pl.LightningDataModule):
             ann_path: Path to annotation file
             train_scanner: scanner index of training set
             val_scanner: scanner index of validation set
+            test_scanner: scanner index of test set
+            test_scanner: scanner index of style image set
             n_train_samples: Number of training samples
             n_val_samples: Number of validation samples
             resize_size: Size of resize transformation (0 = no resizing)
@@ -50,11 +56,13 @@ class MidogDataModule(pl.LightningDataModule):
         self.ann_path = ann_path
         self.train_scanner = train_scanner
         self.val_scanner = val_scanner
+        self.test_scanner = test_scanner
         self.n_train_samples = n_train_samples
         self.n_val_samples = n_val_samples
         self.n_val = n_val
         self.batch_size = batch_size
         self.workers = workers
+        self.style_scanner = style_scanner
 
         self.train_transforms = A.Compose(
             [
@@ -90,6 +98,22 @@ class MidogDataModule(pl.LightningDataModule):
             ),
         )
 
+        self.test_transforms = A.Compose(
+            [
+                ToTensorV2(),
+            ],
+            bbox_params=A.BboxParams(
+                format="pascal_voc", label_fields=["class_labels"], min_visibility=0.3
+            ),
+        )
+
+        self.style_transforms = transforms.Compose(
+            [
+                transforms.CenterCrop(crop_size),
+                transforms.ToTensor(),
+            ]
+        )
+
     def setup(self, stage="fit"):
         all_ids = {
             1: list(range(1, 51)),
@@ -98,10 +122,10 @@ class MidogDataModule(pl.LightningDataModule):
             4: list(range(151, 201)),
         }
 
-        train_ids = all_ids[self.train_scanner][: -self.n_val]
-        val_ids = all_ids[self.val_scanner][-self.n_val :]
-
         if stage == "fit":
+            train_ids = all_ids[self.train_scanner][: -self.n_val]
+            val_ids = all_ids[self.val_scanner][-self.n_val :]
+
             # Load data
             self.train_dataset = MigdogDataset(
                 train_ids,
@@ -119,7 +143,22 @@ class MidogDataModule(pl.LightningDataModule):
             )
 
         elif stage == "test":
-            raise NotImplementedError("Test dataloading not implemented")
+            test_ids = all_ids[self.test_scanner][-self.n_val :]
+            self.test_dataset = MigdogDataset(
+                test_ids,
+                self.ann_path,
+                self.data_path,
+                self.test_transforms,
+                len(test_ids),
+            )
+
+            if self.style_scanner:
+                style_ids = all_ids[self.style_scanner][-self.n_val :]
+                self.style_dataset = SimpleDataset(
+                    self.data_path,
+                    style_ids,
+                    self.style_transforms,
+                )
 
     def train_dataloader(self):
         return DataLoader(
@@ -140,6 +179,37 @@ class MidogDataModule(pl.LightningDataModule):
             pin_memory=True,
             collate_fn=collate_fn,
         )
+
+    def test_dataloader(self):
+        if self.style_scanner:
+            loaders = {
+                "detection": DataLoader(
+                    self.test_dataset,
+                    batch_size=1,
+                    shuffle=False,
+                    num_workers=self.workers,
+                    pin_memory=True,
+                    collate_fn=collate_fn,
+                ),
+                "style": DataLoader(
+                    self.style_dataset,
+                    batch_size=1,
+                    shuffle=False,
+                    num_workers=self.workers,
+                    pin_memory=True,
+                ),
+            }
+
+            return CombinedLoader(loaders, "max_size_cycle")
+        else:
+            return DataLoader(
+                self.test_dataset,
+                batch_size=1,
+                shuffle=False,
+                num_workers=self.workers,
+                pin_memory=True,
+                collate_fn=collate_fn,
+            )
 
 
 def collate_fn(batch):
@@ -275,8 +345,31 @@ class MigdogDataset(data.Dataset):
         return self.n_samples
 
 
+class SimpleDataset(data.Dataset):
+    def __init__(self, root: str, indices: List[int], transforms: Callable):
+        """Image dataset from directory
+
+        Args:
+            root: Path to directory
+            indices: Start and end files indices to include
+            transforms: Image augmentations
+        """
+        super().__init__()
+        self.root = root
+        self.paths = os.listdir(root)[indices[0] : indices[1]]
+        self.transforms = transforms
+
+    def __getitem__(self, index):
+        img = Image.open(os.path.join(self.root, self.paths[index])).convert("RGB")
+        img = self.transforms(img)
+        return img
+
+    def __len__(self):
+        return len(self.paths)
+
+
 if __name__ == "__main__":
-    from visualize import visualize
+    from utils import visualize
 
     # dm = MidogDataModule(crop_size=2000)
     # dm.setup()

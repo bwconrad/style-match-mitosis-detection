@@ -9,7 +9,7 @@ def iou_and_acc(pred_boxes, true_boxes, iou_threshold=0.5, box_format="corners")
     matches = 0
     for gt in true_boxes:
         # Find best predicted IOU for current gt box
-        best_iou = 0
+        best_iou = torch.tensor([0])
         best_pred = None
         for pred in pred_boxes:
             iou = intersection_over_union(

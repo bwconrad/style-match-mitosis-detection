@@ -4,7 +4,6 @@ from argparse import Namespace
 import pytorch_lightning as pl
 from pytorch_lightning.loggers import TensorBoardLogger
 from pytorch_lightning.utilities.cli import LightningArgumentParser
-
 from src.data import MidogDataModule
 from src.model import DetectionModel
 
@@ -19,6 +18,7 @@ parser.add_argument(
 parser.add_argument(
     "--experiment_name", type=str, help="Name of experiment.", default="default"
 )
+parser.link_arguments("data.crop_size", "model.crop_size")
 args = parser.parse_args()
 
 # Define loggers

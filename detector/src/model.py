@@ -1,3 +1,5 @@
+import os
+
 import pytorch_lightning as pl
 import torch
 from torch.optim import SGD, Adam, AdamW
@@ -8,7 +10,8 @@ from torchvision.ops import nms
 from torchvision.utils import make_grid, save_image
 
 from .metrics import iou_and_acc, mean_average_precision
-from .visualize import visualize_detections
+from .style_transfer.model import AdaInModel
+from .utils import split_tiles, stitch_boxes, visualize_detections
 
 
 class DetectionModel(pl.LightningModule):
@@ -21,6 +24,11 @@ class DetectionModel(pl.LightningModule):
         momentum: float = 0.9,
         weight_decay: float = 0.0,
         n_samples: int = 10,
+        crop_size: int = 256,
+        overlap: int = 32,
+        nms_threshold: float = 0.2,
+        score_threshold: float = 0.8,
+        style_checkpoint: str = None,
     ):
         """Midog detection model
 
@@ -32,6 +40,11 @@ class DetectionModel(pl.LightningModule):
             momentum: Momentum for SGD
             weight_decay: Weight decay
             n_samples: Number of validation samples to save detection visualizations of
+            crop_size: Size of image patches
+            overlap: Number of overlapping pixels when patching image during testing
+            nms_threshold: Threshold for non-max supression
+            score_threshold: Box score threshold during inference
+            style_checkpoint: Checkpoint to style transfer model
         """
         super().__init__()
         self.save_hyperparameters()
@@ -41,6 +54,10 @@ class DetectionModel(pl.LightningModule):
         self.optimizer = optimizer
         self.weight_decay = weight_decay
         self.n_samples = n_samples
+        self.crop_size = crop_size
+        self.overlap = overlap
+        self.nms_threshold = nms_threshold
+        self.score_threshold = score_threshold
 
         if arch == "faster_rcnn":
             self.net = fasterrcnn_resnet50_fpn(
@@ -58,6 +75,9 @@ class DetectionModel(pl.LightningModule):
             )
         else:
             raise NotImplementedError(f"{arch} is not an available architecture")
+
+        if style_checkpoint:
+            self.style_net = AdaInModel().load_from_checkpoint(style_checkpoint)
 
     def forward(self, x):
         return self.net(x)
@@ -89,7 +109,17 @@ class DetectionModel(pl.LightningModule):
         for i in range(len(out)):
             if not (len(targets[i]["boxes"]) == len(out[i]["boxes"]) == 0):
                 # Apply NMS
-                keep_idxs = nms(out[i]["boxes"], out[i]["scores"], 0.2)
+                keep_idxs = nms(out[i]["boxes"], out[i]["scores"], self.nms_threshold)
+                out[i]["boxes"] = out[i]["boxes"][keep_idxs]
+                out[i]["scores"] = out[i]["scores"][keep_idxs]
+                out[i]["labels"] = out[i]["labels"][keep_idxs]
+
+                # Filter out low scoring boxes
+                keep_idxs = (
+                    torch.where(out[i]["scores"] > self.score_threshold, 1, 0)
+                    .nonzero()
+                    .flatten()
+                )
                 out[i]["boxes"] = out[i]["boxes"][keep_idxs]
                 out[i]["scores"] = out[i]["scores"][keep_idxs]
                 out[i]["labels"] = out[i]["labels"][keep_idxs]
@@ -197,9 +227,175 @@ class DetectionModel(pl.LightningModule):
             ],
         )
         grid = make_grid(imgs, nrow=1)
-        # save_image(grid, "a.png")
         tensorboard = self.logger.experiment
         tensorboard.add_image("val_samples", grid, self.current_epoch + 1)
+
+    def test_step(self, batch, batch_idx):
+        if hasattr(self, "style_net"):
+            imgs, targets = batch["detection"]
+            imgs_s = batch["style"].repeat(8, 1, 1, 1)
+        else:
+            imgs, targets = batch
+
+        # Split image into patches
+        patches = split_tiles(
+            imgs,
+            tile_size=list(imgs.shape[-2:]),
+            patch_size=self.crop_size,
+            output_size=self.crop_size,
+            overlap=self.overlap,
+        )
+
+        # Batch the patches
+        split_patches = torch.split(patches.squeeze(0), 8, dim=0)
+
+        # Pass patch batches through model
+        out = []
+        for patch_batch in split_patches:
+            if hasattr(self, "style_net"):
+                # Apply style transfer
+                if patch_batch.shape[0] != 8:
+                    imgs_s = imgs_s[: patch_batch.shape[0]]
+                patch_batch_s, _, _ = self.style_net(patch_batch, imgs_s)
+                out.extend(self(patch_batch_s))
+            else:
+                out.extend(self(patch_batch))
+
+        # Convert box predictions into correct format for stitching
+        new_out = []
+        for patch_idx, patch_out in enumerate(out):
+            # If patch has box predictions
+            if not patch_out["boxes"].size(0) == 0:
+                # Apply NMS
+                keep_idxs = nms(
+                    patch_out["boxes"], patch_out["scores"], self.nms_threshold
+                )
+                patch_out["boxes"] = patch_out["boxes"][keep_idxs]
+                patch_out["scores"] = patch_out["scores"][keep_idxs]
+                patch_out["labels"] = patch_out["labels"][keep_idxs]
+
+                # # Filter out low scoring boxes
+                keep_idxs = (
+                    torch.where(patch_out["scores"] > self.score_threshold, 1, 0)
+                    .nonzero()
+                    .flatten()
+                )
+                patch_out["boxes"] = patch_out["boxes"][keep_idxs]
+                patch_out["scores"] = patch_out["scores"][keep_idxs]
+                patch_out["labels"] = patch_out["labels"][keep_idxs]
+
+                for j, (box, label, score) in enumerate(
+                    zip(patch_out["boxes"], patch_out["labels"], patch_out["scores"])
+                ):
+                    new_out.append(
+                        [
+                            box[0].item(),
+                            box[1].item(),
+                            box[2].item(),
+                            box[3].item(),
+                            score.item(),
+                            label.item(),
+                            patch_idx,
+                        ]
+                    )
+        new_out = [torch.tensor(new_out)]
+
+        stitched_boxes = stitch_boxes(
+            new_out,
+            tile_size=list(imgs.shape[-2:]),
+            patch_size=self.crop_size,
+            output_size=self.crop_size,
+            overlap=self.overlap,
+            iou_threshold=self.nms_threshold,
+        )
+
+        # Calculate metrics
+        stitched_boxes = stitched_boxes[0].numpy()
+        if not len(stitched_boxes) == 0:
+            # Prepare outputs and targets for MAP function
+            pred = []
+            for i, (x1, y1, x2, y2, score, label) in enumerate(stitched_boxes):
+                pred.append(
+                    [
+                        i,
+                        int(label),
+                        score,
+                        x1,
+                        y1,
+                        x2,
+                        y2,
+                    ]
+                )
+
+            gt = []
+            for j, (box, label) in enumerate(
+                zip(targets[0]["boxes"], targets[0]["labels"])
+            ):
+                gt.append(
+                    [
+                        j,
+                        label.item(),
+                        1.0,
+                        box[0].item(),
+                        box[1].item(),
+                        box[2].item(),
+                        box[3].item(),
+                    ]
+                )
+
+            # Calculate metrics
+            map = mean_average_precision(pred, gt)
+            iou, acc = iou_and_acc(pred, gt)
+
+            # Log
+            results = {}
+            results["test_map"] = map
+            results["test_iou"] = iou
+            results["test_acc"] = acc
+
+        else:
+            results = {}
+            results["val_map"] = None
+            results["val_iou"] = None
+            results["val_acc"] = None
+
+        # Save some samples detection results
+        sample_out = {}
+        boxes = []
+        labels = []
+        for sb in stitched_boxes:
+            boxes.append(sb[:4])
+            labels.append(sb[-1])
+        sample_out["boxes"] = torch.tensor(boxes)
+        sample_out["labels"] = torch.tensor(labels)
+
+        # Save sample outputs
+        out_img = visualize_detections(
+            imgs[0],
+            sample_out["boxes"],
+            sample_out["labels"],
+            targets[0]["boxes"],
+            targets[0]["labels"],
+        )
+
+        if not os.path.exists("./test_out/"):
+            os.makedirs("./test_out/")
+        save_image(out_img, os.path.join("./test_out/", f"{batch_idx}.jpg"))
+
+        return results
+
+    def test_epoch_end(self, outputs):
+        # Print validation metrics
+        avg_map = torch.stack(
+            [x["test_map"] for x in outputs if x["test_map"] is not None]
+        ).mean()
+        avg_iou = torch.stack(
+            [x["test_iou"] for x in outputs if x["test_iou"] is not None]
+        ).mean()
+        avg_acc = torch.stack(
+            [x["test_acc"] for x in outputs if x["test_acc"] is not None]
+        ).mean()
+        print(f"Test MAP: {avg_map} IOU: {avg_iou} Acc: {avg_acc}")
 
     def configure_optimizers(self):
         if self.optimizer == "sgd":
