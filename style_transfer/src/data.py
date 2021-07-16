@@ -1,5 +1,5 @@
 import os
-from typing import Callable, List
+from typing import Callable, List, Union
 
 import pytorch_lightning as pl
 import torch.utils.data as data
@@ -12,8 +12,9 @@ from torchvision import transforms
 class ContentStyleDataModule(pl.LightningDataModule):
     def __init__(
         self,
-        content_path: str = "data/midog/1/",
-        style_path: str = "data/midog/4/",
+        data_path: str = "data/midog/",
+        content_scanners: Union[List[int], int] = 1,
+        style_scanners: Union[List[int], int] = 4,
         resize_size: int = 0,
         crop_size: int = 256,
         n_val: int = 5,
@@ -23,20 +24,29 @@ class ContentStyleDataModule(pl.LightningDataModule):
         """Content and style image data module
 
         Args:
-            content_path: Path to content images directory
-            style_path: Path to style images directory
+            data_path: Path to image directory
+            content_scanners: Content image scanners
+            style_scanners: style image scanners
             resize_size: Size of resize transformation (0 = no resizing)
             crop_size: Size of random crop transformation
-            n_val: Number of validation samples
+            n_val: Number of validation samples per scanner
             batch_size: Number of batch samples
             workers: Number of data loader workers
         """
         super().__init__()
-        self.content_path = content_path
-        self.style_path = style_path
+        self.data_path = data_path
         self.n_val = n_val
         self.batch_size = batch_size
         self.workers = workers
+
+        if isinstance(content_scanners, int):
+            self.content_scanners = [content_scanners]
+        else:
+            self.content_scanners = content_scanners
+        if isinstance(style_scanners, int):
+            self.style_scanners = [style_scanners]
+        else:
+            self.style_scanners = style_scanners
 
         # No resize before crop
         if resize_size == 0:
@@ -72,53 +82,62 @@ class ContentStyleDataModule(pl.LightningDataModule):
             )
 
     def setup(self, stage="fit"):
+        all_ids = {
+            1: list(range(1, 51)),
+            2: list(range(51, 101)),
+            3: list(range(101, 151)),
+            4: list(range(151, 201)),
+        }
+
         if stage == "fit":
-            # Calculate number of training images
-            n_train_content = len(os.listdir(self.content_path)) - self.n_val
-            n_train_style = len(os.listdir(self.style_path)) - self.n_val
+            # Split content and style images into train/val splits
+            train_content_ids = []
+            val_content_ids = []
+            train_style_ids = []
+            val_style_ids = []
+
+            for s in self.content_scanners:
+                train_content_ids.extend(all_ids[s][: -self.n_val])
+                val_content_ids.extend(all_ids[s][-self.n_val :])
+            for s in self.style_scanners:
+                train_style_ids.extend(all_ids[s][: -self.n_val])
+                val_style_ids.extend(all_ids[s][-self.n_val :])
 
             # Load content and style images
             self.content_train = SimpleDataset(
-                self.content_path, [0, n_train_content], self.train_transforms
+                self.data_path, train_content_ids, self.train_transforms
             )
             self.content_val = SimpleDataset(
-                self.content_path,
-                [n_train_content, n_train_content + self.n_val],
-                self.val_transforms,
+                self.data_path, val_content_ids, self.val_transforms
             )
             self.style_train = SimpleDataset(
-                self.style_path, [0, n_train_style], self.train_transforms
+                self.data_path, train_style_ids, self.train_transforms
             )
             self.style_val = SimpleDataset(
-                self.style_path,
-                [n_train_style, n_train_style + self.n_val],
-                self.val_transforms,
+                self.data_path, val_style_ids, self.val_transforms
             )
         elif stage == "test":
             # Calculate number of images
-            n_content = len(os.listdir(self.content_path)) - self.n_val
-            n_style = len(os.listdir(self.style_path)) - self.n_val
+            content_ids = all_ids[self.content_scanner][-self.n_val :]
+            style_ids = all_ids[self.style_scanner][-self.n_val :]
 
             # Load content and style images
             self.content_test = SimpleDataset(
-                self.content_path,
-                [n_content, n_content + self.n_val],
-                self.val_transforms,
+                self.data_path, content_ids, self.val_transforms
             )
             self.style_test = SimpleDataset(
-                self.style_path,
-                [n_style, n_style + self.n_val],
-                self.val_transforms,
+                self.data_path, style_ids, self.val_transforms
             )
 
     def train_dataloader(self):
-        return {
+        loaders = {
             "content": DataLoader(
                 self.content_train,
                 batch_size=self.batch_size,
                 shuffle=True,
                 num_workers=self.workers,
                 pin_memory=True,
+                drop_last=True,
             ),
             "style": DataLoader(
                 self.style_train,
@@ -126,8 +145,11 @@ class ContentStyleDataModule(pl.LightningDataModule):
                 shuffle=True,
                 num_workers=self.workers,
                 pin_memory=True,
+                drop_last=True,
             ),
         }
+
+        return CombinedLoader(loaders, "max_size_cycle")
 
     def val_dataloader(self):
         loaders = {
@@ -137,6 +159,7 @@ class ContentStyleDataModule(pl.LightningDataModule):
                 shuffle=False,
                 num_workers=self.workers,
                 pin_memory=True,
+                drop_last=True,
             ),
             "style": DataLoader(
                 self.style_val,
@@ -144,6 +167,7 @@ class ContentStyleDataModule(pl.LightningDataModule):
                 shuffle=False,
                 num_workers=self.workers,
                 pin_memory=True,
+                drop_last=True,
             ),
         }
 
@@ -157,6 +181,7 @@ class ContentStyleDataModule(pl.LightningDataModule):
                 shuffle=False,
                 num_workers=self.workers,
                 pin_memory=True,
+                drop_last=True,
             ),
             "style": DataLoader(
                 self.style_test,
@@ -164,6 +189,7 @@ class ContentStyleDataModule(pl.LightningDataModule):
                 shuffle=False,
                 num_workers=self.workers,
                 pin_memory=True,
+                drop_last=True,
             ),
         }
 
@@ -181,7 +207,7 @@ class SimpleDataset(data.Dataset):
         """
         super().__init__()
         self.root = root
-        self.paths = os.listdir(root)[indices[0] : indices[1]]
+        self.paths = [sorted(os.listdir(root))[i - 1] for i in indices]
         self.transforms = transforms
 
     def __getitem__(self, index):

@@ -2,9 +2,9 @@ import os
 from argparse import Namespace
 
 import pytorch_lightning as pl
+from pytorch_lightning.callbacks import ModelCheckpoint
 from pytorch_lightning.loggers import TensorBoardLogger
 from pytorch_lightning.utilities.cli import LightningArgumentParser
-
 from src.data import ContentStyleDataModule
 from src.model import AdaInModel
 
@@ -26,12 +26,13 @@ tb_logger = TensorBoardLogger(
     save_dir=args["output_path"], name=args["experiment_name"]
 )
 
+mc = ModelCheckpoint(monitor="val_loss")
+
 # Setup model
 dm = ContentStyleDataModule(**args["data"])
 model = AdaInModel(**args["model"])
 trainer = pl.Trainer.from_argparse_args(
-    Namespace(**args),
-    logger=tb_logger,
+    Namespace(**args), logger=tb_logger, checkpoint_callback=mc
 )
 
 # Save config
