@@ -26,13 +26,18 @@ tb_logger = TensorBoardLogger(
     save_dir=args["output_path"], name=args["experiment_name"]
 )
 
-mc = ModelCheckpoint(monitor="val_loss")
+mc = ModelCheckpoint(
+    monitor="val_loss",
+    dirpath=tb_logger.root_dir,
+    filename="best-{epoch}-{val_loss:.6f}",
+    save_top_k=1,
+)
 
 # Setup model
 dm = MidogCellDataModule(**args["data"])
 model = Model(**args["model"])
 trainer = pl.Trainer.from_argparse_args(
-    Namespace(**args), logger=tb_logger, checkpoint_callback=mc
+    Namespace(**args), logger=tb_logger, callbacks=[mc]
 )
 
 # Save config

@@ -1,4 +1,5 @@
 import pytorch_lightning as pl
+import timm
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -19,6 +20,7 @@ class Model(pl.LightningModule):
         style_checkpoint: str = None,
         n_classes: int = 4,
         smoothing: float = 0,
+        arch: str = "resnet50",
     ):
         """Scanner Classifer
 
@@ -28,6 +30,7 @@ class Model(pl.LightningModule):
             style_checkpoint: checkpoint of style transfer model
             n_classes: number of classes
             smoothing: label smoothing factor
+            arch: name of architecture
         """
         super(Model, self).__init__()
         self.save_hyperparameters()
@@ -35,8 +38,18 @@ class Model(pl.LightningModule):
         self.optimizer = optimizer
         self.smoothing = smoothing
 
-        self.net = resnet50(pretrained=False)
-        self.net.fc = nn.Linear(self.net.fc.in_features, n_classes)
+        # Initalize network
+        if arch == "resnet50":
+            self.net = resnet50(pretrained=True)
+            self.net.fc = nn.Linear(self.net.fc.in_features, n_classes)
+        elif arch == "vit":
+            self.net = timm.models.vision_transformer.VisionTransformer(
+                img_size=64, patch_size=8, num_classes=3
+            )
+        else:
+            raise NotImplementedError(
+                f"{arch} is not an available network architecture"
+            )
         self.train_acc = Accuracy()
         self.val_acc = Accuracy()
         self.test_confusion = ConfusionMatrix(num_classes=n_classes)
