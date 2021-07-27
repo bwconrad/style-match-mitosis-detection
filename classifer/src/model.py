@@ -59,8 +59,8 @@ class Model(pl.LightningModule):
         pred = self(x)
 
         # Calculate loss and accuracy
-        loss = F.cross_entropy(pred, y)
-        acc = self.train_acc(pred.max(1).indices, y)
+        loss = F.binary_cross_entropy_with_logits(pred, y)
+        acc = self.train_acc(pred.max(1).indices, y.max(1).indices)
 
         # Log
         self.log("train_loss", loss)
@@ -71,13 +71,14 @@ class Model(pl.LightningModule):
 
     def validation_step(self, batch, _):
         x, y = batch
+        y = F.one_hot(y, num_classes=self.hparams.n_classes).float()
 
         # Pass through model
         pred = self(x)
 
         # Calculate loss and accuracy
-        loss = F.cross_entropy(pred, y)
-        acc = self.val_acc(pred.max(1).indices, y)
+        loss = F.binary_cross_entropy_with_logits(pred, y)
+        acc = self.val_acc(pred.max(1).indices, y.max(1).indices)
 
         # Log
         self.log("val_loss", loss)
