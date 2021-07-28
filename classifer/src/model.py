@@ -60,7 +60,7 @@ class Model(pl.LightningModule):
             )
         self.train_acc = Accuracy()
         self.val_acc = Accuracy()
-        self.test_confusion = ConfusionMatrix(num_classes=n_classes)
+        self.confusion = ConfusionMatrix(num_classes=n_classes)
 
         if style_checkpoint:
             self.style_net = AdaInModel().load_from_checkpoint(style_checkpoint)
@@ -124,22 +124,25 @@ class Model(pl.LightningModule):
         print(f"Validation Loss: {avg_loss} Validation Accuracy: {avg_acc}")
 
     def test_step(self, batch, _):
-        x, y = batch["content"]
-        img_s = batch["style"]
+        if isinstance(batch, dict):
+            x_cont, y = batch["content"]
+            img_s = batch["style"]
+            x, _, _ = self.style_net(x_cont, img_s)  # Apply style transfer
+        else:
+            x, y = batch
 
-        # Apply style transfer
-        x_s, _, _ = self.style_net(x, img_s)
-        # x_s = x
+        # Convert to 1-hot targets
+        y = F.one_hot(y, num_classes=self.n_classes).float()
 
         # Pass through model
-        pred = self(x_s)
+        pred = self(x)
 
         max_prob = F.softmax(pred, dim=1).max(1).values
 
         # Calculate loss and accuracy
-        loss = F.cross_entropy(pred, y)
-        acc = self.val_acc(pred.max(1).indices, y)
-        conf = self.test_confusion(pred.max(1).indices, y)
+        loss = F.binary_cross_entropy_with_logits(pred, y)
+        acc = self.val_acc(pred.max(1).indices, y.max(1).indices)
+        conf = self.confusion(pred.max(1).indices, y.max(1).indices)
 
         # Log
         self.log("test_loss", loss)
@@ -148,14 +151,20 @@ class Model(pl.LightningModule):
         return {
             "confs": conf,
             "max_probs": max_prob,
+            "test_loss": loss,
+            "test_acc": acc,
         }
 
     def test_epoch_end(self, outputs):
         confs = torch.stack([x["confs"] for x in outputs], axis=0).sum(dim=0)
-        max_probs = torch.stack([x["max_probs"] for x in outputs], axis=0).mean(dim=0)
+        max_probs = torch.cat([x["max_probs"] for x in outputs], axis=0).mean()
+        avg_loss = torch.stack([x["test_loss"] for x in outputs]).mean()
+        avg_acc = torch.stack([x["test_acc"] for x in outputs]).mean()
 
         print("\nTest Confusion Matrix:")
         print(confs)
+        print(f"Test Accuracy: {avg_acc}")
+        print(f"Test Loss: {avg_loss}")
         print(f"Average Confidence: {max_probs.item():.3}")
 
     def configure_optimizers(self):

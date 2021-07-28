@@ -138,7 +138,7 @@ class MidogCellDataModule(pl.LightningDataModule):
         val_scanner: Union[List[int], int] = 1,
         test_scanner: Union[List[int], int] = 1,
         style_scanner: Union[List[int], int] = None,
-        size: int = 128,
+        size: int = 64,
         n_val: int = 10,
         batch_size: int = 16,
         workers: int = 4,
@@ -177,22 +177,22 @@ class MidogCellDataModule(pl.LightningDataModule):
             4: list(range(151, 201)),
         }
 
-        # Split train and val images
-        train_ids = []
-        if isinstance(self.train_scanner, list):
-            for i in self.train_scanner:
-                train_ids += all_ids[i][: -self.n_val]
-        else:
-            train_ids += all_ids[self.train_scanner][: -self.n_val]
-
-        val_ids = []
-        if isinstance(self.val_scanner, list):
-            for i in self.val_scanner:
-                val_ids += all_ids[i][-self.n_val :]
-        else:
-            val_ids += all_ids[self.val_scanner][-self.n_val :]
-
         if stage == "fit":
+            # Split train and val images
+            train_ids = []
+            if isinstance(self.train_scanner, list):
+                for i in self.train_scanner:
+                    train_ids += all_ids[i][: -self.n_val]
+            else:
+                train_ids += all_ids[self.train_scanner][: -self.n_val]
+
+            val_ids = []
+            if isinstance(self.val_scanner, list):
+                for i in self.val_scanner:
+                    val_ids += all_ids[i][-self.n_val :]
+            else:
+                val_ids += all_ids[self.val_scanner][-self.n_val :]
+
             # Load data
             self.train_dataset = CellClassificationDataset(
                 train_ids, self.ann_path, self.data_path, size=self.size, train=True
@@ -202,16 +202,39 @@ class MidogCellDataModule(pl.LightningDataModule):
             )
 
         elif stage == "test":
-            raise NotImplementedError("")
-            n_style = len(os.listdir(self.style_path)) - self.n_val
-            self.test_dataset = ScannerClassificationDataset(
-                val_files, self.val_transforms
+            test_ids = []
+            if isinstance(self.test_scanner, list):
+                for i in self.test_scanner:
+                    test_ids += all_ids[i][-self.n_val :]
+            else:
+                test_ids += all_ids[self.test_scanner][-self.n_val :]
+
+            self.test_dataset = CellClassificationDataset(
+                test_ids, self.ann_path, self.data_path, size=self.size, train=False
             )
-            self.style_dataset = SimpleDataset(
-                self.style_path,
-                [n_style, n_style + self.n_val],
-                self.val_transforms,
-            )
+
+            # Create style dataset
+            if self.style_scanner:
+                style_ids = []
+                if isinstance(self.style_scanner, list):
+                    for i in self.style_scanner:
+                        style_ids += all_ids[i][-self.n_val :]
+                else:
+                    style_ids += all_ids[self.style_scanner][-self.n_val :]
+
+                style_transforms = transforms.Compose(
+                    [
+                        transforms.CenterCrop(self.size),
+                        transforms.ToTensor(),
+                    ]
+                )
+                self.style_dataset = SimpleDataset2(
+                    style_ids,
+                    self.ann_path,
+                    self.data_path,
+                    style_transforms,
+                    len(self.test_dataset),
+                )
 
     def train_dataloader(self):
         return DataLoader(
@@ -232,24 +255,33 @@ class MidogCellDataModule(pl.LightningDataModule):
         )
 
     def test_dataloader(self):
-        loaders = {
-            "content": DataLoader(
+        if hasattr(self, "style_dataset"):
+            loaders = {
+                "content": DataLoader(
+                    self.test_dataset,
+                    batch_size=self.batch_size,
+                    shuffle=False,
+                    num_workers=self.workers,
+                    pin_memory=True,
+                ),
+                "style": DataLoader(
+                    self.style_dataset,
+                    batch_size=self.batch_size,
+                    shuffle=False,
+                    num_workers=self.workers,
+                    pin_memory=True,
+                ),
+            }
+
+            return CombinedLoader(loaders, "max_size_cycle")
+        else:
+            return DataLoader(
                 self.test_dataset,
                 batch_size=self.batch_size,
                 shuffle=False,
                 num_workers=self.workers,
                 pin_memory=True,
-            ),
-            "style": DataLoader(
-                self.style_dataset,
-                batch_size=self.batch_size,
-                shuffle=False,
-                num_workers=self.workers,
-                pin_memory=True,
-            ),
-        }
-
-        return CombinedLoader(loaders, "max_size_cycle")
+            )
 
 
 class ScannerClassificationDataset(data.Dataset):
@@ -296,6 +328,109 @@ class SimpleDataset(data.Dataset):
 
     def __len__(self):
         return len(self.paths)
+
+
+class SimpleDataset2(data.Dataset):
+    def __init__(
+        self,
+        ids: List[int],
+        ann_path: str,
+        img_path: str,
+        transforms: Callable,
+        length: int,
+    ):
+        super().__init__()
+        self.img_path = img_path
+        self.length = length
+
+        # Load annotations
+        _, file_list = self.load_ann(ann_path)
+
+        # Preload images
+        print("Loading images to memory...")
+        self.imgs = {}
+        for id in ids:
+            file_name = os.path.join(self.img_path, file_list[id - 1])
+            self.imgs[id] = Image.open(file_name).convert("RGB")
+        print(f"Loaded {len(self.imgs)} images")
+
+        self.ids = ids
+        self.transforms = transforms
+
+    def load_ann(self, ann_path):
+        rows = []
+        with open(ann_path) as f:
+            data = json.load(f)
+
+            file_list = []
+            for row in data["images"]:
+                file_name = row["file_name"]
+                file_list.append(file_name)
+                id = row["id"]
+                width = row["width"]
+                height = row["height"]
+
+                if id in list(range(1, 51)):
+                    scanner = 1
+                elif id in list(range(51, 101)):
+                    scanner = 2
+                elif id in list(range(101, 151)):
+                    scanner = 3
+                else:
+                    scanner = 4
+
+                # Create row for each cell annotation
+                for annotation in [
+                    anno for anno in data["annotations"] if anno["image_id"] == id
+                ]:
+                    # Clip negative coordinates to 0
+                    if annotation["bbox"][0] < 0:
+                        annotation["bbox"][0] = 0
+                    if annotation["bbox"][1] < 0:
+                        annotation["bbox"][1] = 0
+
+                    # Clip coordinates > height or width
+                    if annotation["bbox"][2] > width:
+                        annotation["bbox"][2] = width
+                    if annotation["bbox"][3] > height:
+                        annotation["bbox"][3] = height
+
+                    rows.append(
+                        [
+                            file_name,
+                            id,
+                            annotation["bbox"],
+                            annotation["category_id"],
+                            scanner,
+                            width,
+                            height,
+                        ]
+                    )
+
+        return (
+            pd.DataFrame(
+                rows,
+                columns=[
+                    "file_name",
+                    "id",
+                    "box",
+                    "label",
+                    "scanner",
+                    "width",
+                    "height",
+                ],
+            ),
+            file_list,
+        )
+
+    def __getitem__(self, index):
+        id = self.ids[index % len(self.ids)]
+        img = self.imgs[id]
+        img = self.transforms(img)
+        return img
+
+    def __len__(self):
+        return self.length
 
 
 class CellClassificationDataset(data.Dataset):
@@ -521,6 +656,15 @@ if __name__ == "__main__":
     # dm.setup(stage="test")
     # s = dm.style_dataset
     # t = dm.test_dataset
+    # style_transforms = transforms.Compose(
+    #     [
+    #         transforms.CenterCrop(64),
+    #         transforms.ToTensor(),
+    #     ]
+    # )
+    # d = SimpleDataset2(
+    #     [100, 101, 102, 121], "data/MIDOG.json", "data/midog/", style_transforms
+    # )
 
     d = CellClassificationDataset(
         [100, 101, 102], "data/MIDOG.json", "data/midog/", size=128, train=False

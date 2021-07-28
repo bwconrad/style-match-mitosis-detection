@@ -28,9 +28,7 @@ tb_logger = TensorBoardLogger(
 
 mc = ModelCheckpoint(
     monitor="val_loss",
-    dirpath=tb_logger.root_dir,
-    filename="best-{epoch}-{val_loss:.6f}",
-    save_top_k=1,
+    filename="best-{epoch}-{val_acc:.3f}",
 )
 
 # Setup model
