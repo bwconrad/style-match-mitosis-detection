@@ -1,3 +1,4 @@
+import numpy as np
 import pytorch_lightning as pl
 import timm
 import torch
@@ -20,6 +21,8 @@ class Model(pl.LightningModule):
         style_checkpoint: str = None,
         n_classes: int = 4,
         smoothing: float = 0,
+        mix_alpha: float = 0,
+        cutmix_alpha: float = 0,
         arch: str = "resnet50",
     ):
         """Scanner Classifer
@@ -30,6 +33,8 @@ class Model(pl.LightningModule):
             style_checkpoint: checkpoint of style transfer model
             n_classes: number of classes
             smoothing: label smoothing factor
+            mix_alpha: alpha value for mixup
+            cutmix_alpha: alpha value for cutmix
             arch: name of architecture
         """
         super(Model, self).__init__()
@@ -37,6 +42,9 @@ class Model(pl.LightningModule):
         self.lr = lr
         self.optimizer = optimizer
         self.smoothing = smoothing
+        self.mix_alpha = mix_alpha
+        self.cutmix_alpha = cutmix_alpha
+        self.n_classes = n_classes
 
         # Initalize network
         if arch == "resnet50":
@@ -62,11 +70,19 @@ class Model(pl.LightningModule):
 
     def training_step(self, batch, _):
         x, y = batch
-        y = F.one_hot(y, num_classes=self.hparams.n_classes).float()
+        y = F.one_hot(y, num_classes=self.n_classes).float()
 
         # Apply label smoothing
-        if self.hparams.smoothing > 0:
+        if self.smoothing > 0:
             y = self._smooth(y)
+
+        # Apply mixup
+        if self.mix_alpha > 0:
+            x, y = self._mixup(x, y)
+
+        # Apply cutmix
+        if self.cutmix_alpha > 0:
+            x, y = self._cutmix(x, y)
 
         # Pass through model
         pred = self(x)
@@ -84,7 +100,7 @@ class Model(pl.LightningModule):
 
     def validation_step(self, batch, _):
         x, y = batch
-        y = F.one_hot(y, num_classes=self.hparams.n_classes).float()
+        y = F.one_hot(y, num_classes=self.n_classes).float()
 
         # Pass through model
         pred = self(x)
@@ -152,7 +168,7 @@ class Model(pl.LightningModule):
         return [optimizer], [scheduler]
 
     def _smooth(self, y):
-        smoothing = self.hparams.smoothing
+        smoothing = self.smoothing
         confidence = 1.0 - smoothing  # Confidence for target class
         label_shape = y.size()
         other = smoothing / (label_shape[1] - 1)  # Confidence for non-target classes
@@ -163,3 +179,43 @@ class Model(pl.LightningModule):
         smooth_y.add_(y * confidence).sub_(y * other)
 
         return smooth_y
+
+    def _mixup(self, x, y):
+        lam = np.random.beta(self.mix_alpha, self.mix_alpha)
+        indices = np.random.permutation(x.size(0))
+        x_mix = x * lam + x[indices] * (1 - lam)
+        y_mix = y * lam + y[indices] * (1 - lam)
+        return x_mix, y_mix
+
+    def _cutmix(self, x, y):
+        def rand_bbox(size, lam):
+            """ From: https://github.com/clovaai/CutMix-PyTorch/blob/master/train.py """
+            W = size[2]
+            H = size[3]
+            cut_rat = np.sqrt(1.0 - lam)
+            cut_w = np.int(W * cut_rat)
+            cut_h = np.int(H * cut_rat)
+
+            cx = np.random.randint(W)
+            cy = np.random.randint(H)
+
+            x1 = np.clip(cx - cut_w // 2, 0, W)
+            y1 = np.clip(cy - cut_h // 2, 0, H)
+            x2 = np.clip(cx + cut_w // 2, 0, W)
+            y2 = np.clip(cy + cut_h // 2, 0, H)
+
+            return x1, y1, x2, y2
+
+        lam = np.random.beta(self.cutmix_alpha, self.cutmix_alpha)
+        indices = np.random.permutation(x.size(0))
+
+        # Perform cutmix
+        x1, y1, x2, y2 = rand_bbox(x.size(), lam)  # Select a random rectangle
+        x[:, :, x1:x2, y1:y2] = x[
+            indices, :, x1:x2, y1:y2
+        ]  # Replace the cutout section with the other image's pixels
+
+        # Adjust target
+        lam = 1 - ((x2 - x1) * (y2 - y1) / (x.size()[-1] * x.size()[-2]))
+        y_mix = y * lam + y[indices] * (1 - lam)
+        return x, y_mix
