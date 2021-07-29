@@ -53,7 +53,9 @@ def visualize(image, bboxes, category_ids):
         plt.show()
 
 
-def visualize_detections(img, pred_bboxes, pred_labels, target_bboxes, target_labels):
+def visualize_detections(
+    img, pred_bboxes, pred_labels, target_bboxes, target_labels, only_pos=False
+):
     category_id_to_name = {1: "positive", 2: "hard negative"}
 
     # Convert to numpy
@@ -67,11 +69,15 @@ def visualize_detections(img, pred_bboxes, pred_labels, target_bboxes, target_la
 
     # Add predicted boxes
     for bbox, category_id in zip(pred_bboxes, pred_labels):
+        if only_pos and category_id == 2:
+            continue
         class_name = category_id_to_name[category_id]
         img = visualize_bbox(img, bbox, class_name, color=(1, 0, 0))
 
     # Add target boxes
     for bbox, category_id in zip(target_bboxes, target_labels):
+        if only_pos and category_id == 2:
+            continue
         class_name = category_id_to_name[category_id]
         img = visualize_bbox(img, bbox, class_name, color=(0, 0, 1))
 

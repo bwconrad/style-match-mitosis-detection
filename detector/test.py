@@ -21,7 +21,10 @@ args["logger"] = False
 # Setup model
 dm = MidogDataModule(**args["data"])
 model = DetectionModel().load_from_checkpoint(
-    args["checkpoint"], style_checkpoint=args["model"]["style_checkpoint"], strict=False
+    args["checkpoint"],
+    style_checkpoint=args["model"]["style_checkpoint"],
+    eval_only_positives=args["model"]["eval_only_positives"],
+    strict=False,
 )
 trainer = pl.Trainer.from_argparse_args(
     Namespace(**args),

@@ -29,6 +29,7 @@ class DetectionModel(pl.LightningModule):
         nms_threshold: float = 0.2,
         score_threshold: float = 0.8,
         style_checkpoint: str = None,
+        eval_only_positives: bool = False,
     ):
         """Midog detection model
 
@@ -45,6 +46,7 @@ class DetectionModel(pl.LightningModule):
             nms_threshold: Threshold for non-max supression
             score_threshold: Box score threshold during inference
             style_checkpoint: Checkpoint to style transfer model
+            eval_only_positives: only evaluate on positives (ignore hard negatives)
         """
         super().__init__()
         self.save_hyperparameters()
@@ -58,6 +60,7 @@ class DetectionModel(pl.LightningModule):
         self.overlap = overlap
         self.nms_threshold = nms_threshold
         self.score_threshold = score_threshold
+        self.eval_only_positives = eval_only_positives
 
         if arch == "faster_rcnn":
             self.net = fasterrcnn_resnet50_fpn(
@@ -131,7 +134,7 @@ class DetectionModel(pl.LightningModule):
                 ):
                     pred.append(
                         [
-                            j,
+                            0,
                             c.item(),
                             score.item(),
                             box[0].item(),
@@ -147,7 +150,7 @@ class DetectionModel(pl.LightningModule):
                 ):
                     gt.append(
                         [
-                            j,
+                            0,
                             c.item(),
                             1.0,
                             box[0].item(),
@@ -231,7 +234,7 @@ class DetectionModel(pl.LightningModule):
         tensorboard.add_image("val_samples", grid, self.current_epoch + 1)
 
     def test_step(self, batch, batch_idx):
-        if hasattr(self, "style_net"):
+        if hasattr(self, "style_net") and isinstance(batch, dict):
             imgs, targets = batch["detection"]
             imgs_s = batch["style"].repeat(8, 1, 1, 1)
         else:
@@ -274,7 +277,7 @@ class DetectionModel(pl.LightningModule):
                 patch_out["scores"] = patch_out["scores"][keep_idxs]
                 patch_out["labels"] = patch_out["labels"][keep_idxs]
 
-                # # Filter out low scoring boxes
+                # Filter out low scoring boxes
                 keep_idxs = (
                     torch.where(patch_out["scores"] > self.score_threshold, 1, 0)
                     .nonzero()
@@ -283,6 +286,15 @@ class DetectionModel(pl.LightningModule):
                 patch_out["boxes"] = patch_out["boxes"][keep_idxs]
                 patch_out["scores"] = patch_out["scores"][keep_idxs]
                 patch_out["labels"] = patch_out["labels"][keep_idxs]
+
+                # Filter out hard negatives
+                if self.eval_only_positives:
+                    keep_idxs = (
+                        torch.where(patch_out["labels"] == 1, 1, 0).nonzero().flatten()
+                    )
+                    patch_out["boxes"] = patch_out["boxes"][keep_idxs]
+                    patch_out["scores"] = patch_out["scores"][keep_idxs]
+                    patch_out["labels"] = patch_out["labels"][keep_idxs]
 
                 for j, (box, label, score) in enumerate(
                     zip(patch_out["boxes"], patch_out["labels"], patch_out["scores"])
@@ -317,7 +329,7 @@ class DetectionModel(pl.LightningModule):
             for i, (x1, y1, x2, y2, score, label) in enumerate(stitched_boxes):
                 pred.append(
                     [
-                        i,
+                        0,
                         int(label),
                         score,
                         x1,
@@ -331,9 +343,12 @@ class DetectionModel(pl.LightningModule):
             for j, (box, label) in enumerate(
                 zip(targets[0]["boxes"], targets[0]["labels"])
             ):
+                if self.eval_only_positives and label == 2:
+                    continue
+
                 gt.append(
                     [
-                        j,
+                        0,
                         label.item(),
                         1.0,
                         box[0].item(),
@@ -355,9 +370,9 @@ class DetectionModel(pl.LightningModule):
 
         else:
             results = {}
-            results["val_map"] = None
-            results["val_iou"] = None
-            results["val_acc"] = None
+            results["test_map"] = None
+            results["test_iou"] = None
+            results["test_acc"] = None
 
         # Save some samples detection results
         sample_out = {}
@@ -376,6 +391,7 @@ class DetectionModel(pl.LightningModule):
             sample_out["labels"],
             targets[0]["boxes"],
             targets[0]["labels"],
+            only_pos=self.eval_only_positives,
         )
 
         if not os.path.exists("./test_out/"):
@@ -385,7 +401,7 @@ class DetectionModel(pl.LightningModule):
         return results
 
     def test_epoch_end(self, outputs):
-        # Print validation metrics
+        # Print metrics
         avg_map = torch.stack(
             [x["test_map"] for x in outputs if x["test_map"] is not None]
         ).mean()
