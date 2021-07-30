@@ -1,6 +1,7 @@
 import os
 from typing import Callable, List, Union
 
+import numpy as np
 import pytorch_lightning as pl
 import torch.utils.data as data
 from PIL import Image
@@ -197,23 +198,44 @@ class ContentStyleDataModule(pl.LightningDataModule):
 
 
 class SimpleDataset(data.Dataset):
-    def __init__(self, root: str, indices: List[int], transforms: Callable):
+    def __init__(
+        self, root: str, ids: List[int], transforms: Callable, preload: bool = False
+    ):
         """Image dataset from directory
 
         Args:
             root: Path to directory
-            indices: Start and end files indices to include
+            ids: Image ids
             transforms: Image augmentations
+            preload: Preload images to memory
         """
         super().__init__()
         self.root = root
-        self.paths = [sorted(os.listdir(root))[i - 1] for i in indices]
+        self.paths = [sorted(os.listdir(root))[i - 1] for i in ids]
         self.transforms = transforms
+        self.preload = preload
+
+        # Preload images
+        if preload:
+            print("Loading images to memory...")
+            self.imgs = []
+            for i in range(len(ids)):
+                file_name = os.path.join(self.root, self.paths[i])
+                self.imgs.append(Image.open(file_name).convert("RGB"))
+            print(f"Loaded {len(self.imgs)} images")
 
     def __getitem__(self, index):
-        img = Image.open(os.path.join(self.root, self.paths[index])).convert("RGB")
+        if self.preload:
+            img = self.imgs[index]
+        else:
+            img = Image.open(os.path.join(self.root, self.paths[index])).convert("RGB")
         img = self.transforms(img)
         return img
 
     def __len__(self):
         return len(self.paths)
+
+
+if __name__ == "__main__":
+    d = SimpleDataset("data/midog/", [5, 2, 7], type)
+    print(d[0])

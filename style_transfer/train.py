@@ -32,7 +32,7 @@ mc = ModelCheckpoint(monitor="val_loss")
 dm = ContentStyleDataModule(**args["data"])
 model = AdaInModel(**args["model"])
 trainer = pl.Trainer.from_argparse_args(
-    Namespace(**args), logger=tb_logger, checkpoint_callback=mc
+    Namespace(**args), logger=tb_logger, callbacks=[mc]
 )
 
 # Save config
