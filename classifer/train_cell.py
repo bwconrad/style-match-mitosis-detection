@@ -19,6 +19,7 @@ parser.add_argument(
 parser.add_argument(
     "--experiment_name", type=str, help="Name of experiment.", default="default"
 )
+parser.link_arguments("model.n_classes", "data.n_classes")
 args = parser.parse_args()
 
 # Define loggers

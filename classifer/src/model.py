@@ -101,6 +101,8 @@ class Model(pl.LightningModule):
     def validation_step(self, batch, _):
         x, y = batch
         y = F.one_hot(y, num_classes=self.n_classes).float()
+        print(y)
+        exit()
 
         # Pass through model
         pred = self(x)

@@ -142,6 +142,7 @@ class MidogCellDataModule(pl.LightningDataModule):
         n_val: int = 10,
         batch_size: int = 16,
         workers: int = 4,
+        n_classes: int = 3,
     ):
         """Midog classification image data module
 
@@ -156,6 +157,7 @@ class MidogCellDataModule(pl.LightningDataModule):
             n_val: Number of validation samples per scanner
             batch_size: Number of batch samples
             workers: Number of data loader workers
+            n_classes: Number of classes. 2 = neg/pos 3 = neg/pos/hard_neg
         """
         super().__init__()
         self.data_path = data_path
@@ -168,6 +170,7 @@ class MidogCellDataModule(pl.LightningDataModule):
         self.batch_size = batch_size
         self.workers = workers
         self.size = size
+        self.n_classes = n_classes
 
     def setup(self, stage="fit"):
         all_ids = {
@@ -195,10 +198,20 @@ class MidogCellDataModule(pl.LightningDataModule):
 
             # Load data
             self.train_dataset = CellClassificationDataset(
-                train_ids, self.ann_path, self.data_path, size=self.size, train=True
+                train_ids,
+                self.ann_path,
+                self.data_path,
+                size=self.size,
+                train=True,
+                n_classes=self.n_classes,
             )
             self.val_dataset = CellClassificationDataset(
-                val_ids, self.ann_path, self.data_path, size=self.size, train=False
+                val_ids,
+                self.ann_path,
+                self.data_path,
+                size=self.size,
+                train=False,
+                n_classes=self.n_classes,
             )
 
         elif stage == "test":
@@ -210,7 +223,12 @@ class MidogCellDataModule(pl.LightningDataModule):
                 test_ids += all_ids[self.test_scanner][-self.n_val :]
 
             self.test_dataset = CellClassificationDataset(
-                test_ids, self.ann_path, self.data_path, size=self.size, train=False
+                test_ids,
+                self.ann_path,
+                self.data_path,
+                size=self.size,
+                train=False,
+                n_classes=self.n_classes,
             )
 
             # Create style dataset
@@ -441,13 +459,14 @@ class CellClassificationDataset(data.Dataset):
         img_path: str,
         size: int,
         train: bool = True,
+        n_classes: int = 3,
     ):
         super().__init__()
         self.img_path = img_path
         self.train = train
 
         # Load annotations
-        self.annotations, file_list = self.load_ann(ann_path)
+        self.annotations, file_list = self.load_ann(ann_path, n_classes=n_classes)
         self.annotations = self.annotations.loc[self.annotations["id"].isin(ids)]
 
         # Preload images
@@ -483,7 +502,7 @@ class CellClassificationDataset(data.Dataset):
                 ],
             )
         else:
-            self.annotations = self.generate_false_samples(self.annotations)
+            # self.annotations = self.generate_false_samples(self.annotations)
             self.transforms = A.Compose(
                 [
                     A.RandomCropNearBBox(0),
@@ -549,7 +568,7 @@ class CellClassificationDataset(data.Dataset):
 
         return pd.concat([annotations, new_anns]).reset_index()
 
-    def load_ann(self, ann_path):
+    def load_ann(self, ann_path, n_classes=3):
         rows = []
         with open(ann_path) as f:
             data = json.load(f)
@@ -586,6 +605,10 @@ class CellClassificationDataset(data.Dataset):
                         annotation["bbox"][2] = width
                     if annotation["bbox"][3] > height:
                         annotation["bbox"][3] = height
+
+                    # If two class convert hard negatives to negatives
+                    if n_classes == 2 and annotation["category_id"] == 2:
+                        annotation["category_id"] = 0
 
                     rows.append(
                         [
@@ -667,8 +690,15 @@ if __name__ == "__main__":
     # )
 
     d = CellClassificationDataset(
-        [100, 101, 102], "data/MIDOG.json", "data/midog/", size=128, train=False
+        [100, 101, 102],
+        "data/MIDOG.json",
+        "data/midog/",
+        size=128,
+        train=False,
+        n_classes=2,
     )
+    print(d.annotations.groupby("label").aggregate("count"))
+    exit()
     print(len(d))
     x = d[-2]
     print(x[1])
