@@ -64,7 +64,7 @@ class DetectionModel(pl.LightningModule):
 
         if arch == "faster_rcnn":
             self.net = fasterrcnn_resnet50_fpn(
-                pretrained=True, pretrained_backbone=True
+                pretrained=True, pretrained_backbone=True, min_size=256, max_size=256
             )
             in_features = self.net.roi_heads.box_predictor.cls_score.in_features
             head = FastRCNNPredictor(in_features, n_classes + 1)
@@ -127,6 +127,15 @@ class DetectionModel(pl.LightningModule):
                 out[i]["scores"] = out[i]["scores"][keep_idxs]
                 out[i]["labels"] = out[i]["labels"][keep_idxs]
 
+                # Filter out hard negatives
+                if self.eval_only_positives:
+                    keep_idxs = (
+                        torch.where(out[i]["labels"] == 1, 1, 0).nonzero().flatten()
+                    )
+                    out[i]["boxes"] = out[i]["boxes"][keep_idxs]
+                    out[i]["scores"] = out[i]["scores"][keep_idxs]
+                    out[i]["labels"] = out[i]["labels"][keep_idxs]
+
                 # Prepare outputs and targets for MAP function
                 pred = []
                 for j, (box, c, score) in enumerate(
@@ -148,6 +157,9 @@ class DetectionModel(pl.LightningModule):
                 for j, (box, c) in enumerate(
                     zip(targets[i]["boxes"], targets[i]["labels"])
                 ):
+                    if self.eval_only_positives and c == 2:
+                        continue
+
                     gt.append(
                         [
                             0,
@@ -224,6 +236,7 @@ class DetectionModel(pl.LightningModule):
                     x["sample_pred_labels"],
                     x["sample_target_boxes"],
                     x["sample_target_labels"],
+                    only_pos=self.eval_only_positives,
                 )
                 for x in outputs
                 if x["sample_img"] is not None
@@ -236,7 +249,8 @@ class DetectionModel(pl.LightningModule):
     def test_step(self, batch, batch_idx):
         if hasattr(self, "style_net") and isinstance(batch, dict):
             imgs, targets = batch["detection"]
-            imgs_s = batch["style"].repeat(8, 1, 1, 1)
+            # imgs_s = batch["style"].repeat(8, 1, 1, 1)
+            imgs_s = batch["style"]
         else:
             imgs, targets = batch
 
@@ -257,7 +271,9 @@ class DetectionModel(pl.LightningModule):
         for patch_batch in split_patches:
             if hasattr(self, "style_net"):
                 # Apply style transfer
-                if patch_batch.shape[0] != 8:
+                if patch_batch.shape[0] != imgs_s.shape[0]:
+                    print(patch_batch.size())
+                    print(imgs_s.size())
                     imgs_s = imgs_s[: patch_batch.shape[0]]
                 patch_batch_s, _, _ = self.style_net(patch_batch, imgs_s)
                 out.extend(self(patch_batch_s))
@@ -312,14 +328,17 @@ class DetectionModel(pl.LightningModule):
                     )
         new_out = [torch.tensor(new_out)]
 
-        stitched_boxes = stitch_boxes(
-            new_out,
-            tile_size=list(imgs.shape[-2:]),
-            patch_size=self.crop_size,
-            output_size=self.crop_size,
-            overlap=self.overlap,
-            iou_threshold=self.nms_threshold,
-        )
+        if len(new_out[0] != 0):
+            stitched_boxes = stitch_boxes(
+                new_out,
+                tile_size=list(imgs.shape[-2:]),
+                patch_size=self.crop_size,
+                output_size=self.crop_size,
+                overlap=self.overlap,
+                iou_threshold=self.nms_threshold,
+            )
+        else:
+            stitched_boxes = new_out
 
         # Calculate metrics
         stitched_boxes = stitched_boxes[0].numpy()
@@ -411,7 +430,7 @@ class DetectionModel(pl.LightningModule):
         avg_acc = torch.stack(
             [x["test_acc"] for x in outputs if x["test_acc"] is not None]
         ).mean()
-        print(f"Test MAP: {avg_map} IOU: {avg_iou} Acc: {avg_acc}")
+        print(f"\nTest MAP: {avg_map} IOU: {avg_iou} Acc: {avg_acc}")
 
     def configure_optimizers(self):
         if self.optimizer == "sgd":

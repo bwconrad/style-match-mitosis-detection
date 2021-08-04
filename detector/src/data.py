@@ -28,13 +28,12 @@ class MidogDataModule(pl.LightningDataModule):
         style_scanner: int = None,
         n_train_samples: int = 1500,
         n_val_samples: int = 500,
-        resize_size: str = 0,
         crop_size: int = 256,
         n_val: int = 10,
         batch_size: int = 4,
         workers: int = 4,
     ):
-        """Midog classification image data module
+        """Midog detection image data module
 
         Args:
             data_path: Path to image directory
@@ -45,7 +44,6 @@ class MidogDataModule(pl.LightningDataModule):
             test_scanner: scanner index of style image set
             n_train_samples: Number of training samples
             n_val_samples: Number of validation samples
-            resize_size: Size of resize transformation (0 = no resizing)
             crop_size: Size of random crop transformation
             n_val: Number of validation samples per class
             batch_size: Number of batch samples
@@ -153,7 +151,7 @@ class MidogDataModule(pl.LightningDataModule):
             )
 
             if self.style_scanner:
-                style_ids = all_ids[self.style_scanner][-self.n_val :]
+                style_ids = all_ids[self.style_scanner]
                 self.style_dataset = SimpleDataset(
                     self.data_path,
                     style_ids,
@@ -193,7 +191,7 @@ class MidogDataModule(pl.LightningDataModule):
                 ),
                 "style": DataLoader(
                     self.style_dataset,
-                    batch_size=1,
+                    batch_size=8,
                     shuffle=False,
                     num_workers=self.workers,
                     pin_memory=True,
@@ -346,7 +344,7 @@ class MigdogDataset(data.Dataset):
 
 
 class SimpleDataset(data.Dataset):
-    def __init__(self, root: str, indices: List[int], transforms: Callable):
+    def __init__(self, root: str, ids: List[int], transforms: Callable):
         """Image dataset from directory
 
         Args:
@@ -356,7 +354,7 @@ class SimpleDataset(data.Dataset):
         """
         super().__init__()
         self.root = root
-        self.paths = os.listdir(root)[indices[0] : indices[1]]
+        self.paths = [sorted(os.listdir(root))[i - 1] for i in ids]
         self.transforms = transforms
 
     def __getitem__(self, index):
