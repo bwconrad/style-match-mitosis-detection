@@ -81,12 +81,17 @@ class DetectionModel(pl.LightningModule):
 
         if style_checkpoint:
             self.style_net = AdaInModel().load_from_checkpoint(style_checkpoint)
+            self.style_net.freeze()
 
     def forward(self, x):
         return self.net(x)
 
     def training_step(self, batch, _):
-        imgs, targets = batch
+        if hasattr(self, "style_net"):
+            imgs, targets, imgs_s = batch
+            imgs, _, _ = self.style_net(imgs, imgs_s)
+        else:
+            imgs, targets = batch
 
         # Pass through model
         loss_dict = self.net(imgs, targets)
@@ -101,7 +106,11 @@ class DetectionModel(pl.LightningModule):
         return loss
 
     def validation_step(self, batch, batch_idx):
-        imgs, targets = batch
+        if hasattr(self, "style_net"):
+            imgs, targets, imgs_s = batch
+            imgs, _, _ = self.style_net(imgs, imgs_s)
+        else:
+            imgs, targets = batch
 
         # Pass through model
         out = self(imgs)
@@ -272,8 +281,6 @@ class DetectionModel(pl.LightningModule):
             if hasattr(self, "style_net"):
                 # Apply style transfer
                 if patch_batch.shape[0] != imgs_s.shape[0]:
-                    print(patch_batch.size())
-                    print(imgs_s.size())
                     imgs_s = imgs_s[: patch_batch.shape[0]]
                 patch_batch_s, _, _ = self.style_net(patch_batch, imgs_s)
                 out.extend(self(patch_batch_s))

@@ -59,7 +59,7 @@ def visualize_detections(
     category_id_to_name = {1: "positive", 2: "hard negative"}
 
     # Convert to numpy
-    img = img.cpu().numpy().transpose(1, 2, 0)
+    img = img.float().cpu().numpy().transpose(1, 2, 0)
     pred_bboxes = pred_bboxes.cpu().numpy()
     target_bboxes = target_bboxes.cpu().numpy()
     pred_labels = pred_labels.cpu().numpy()

@@ -105,6 +105,13 @@ class MidogDataModule(pl.LightningDataModule):
             ),
         )
 
+        self.style_train_transforms = A.Compose(
+            [A.RandomCrop(crop_size, crop_size), ToTensorV2()]
+        )
+        self.style_test_transforms = A.Compose(
+            [A.CenterCrop(crop_size, crop_size), ToTensorV2()]
+        )
+
         self.style_transforms = transforms.Compose(
             [
                 transforms.CenterCrop(crop_size),
@@ -125,20 +132,43 @@ class MidogDataModule(pl.LightningDataModule):
             val_ids = all_ids[self.val_scanner][-self.n_val :]
 
             # Load data
-            self.train_dataset = MigdogDataset(
-                train_ids,
-                self.ann_path,
-                self.data_path,
-                self.train_transforms,
-                self.n_train_samples,
-            )
-            self.val_dataset = MigdogDataset(
-                val_ids,
-                self.ann_path,
-                self.data_path,
-                self.val_transforms,
-                self.n_val_samples,
-            )
+            if self.style_scanner:
+                style_ids_train = all_ids[self.style_scanner][: -self.n_val]
+                style_ids_val = all_ids[self.style_scanner][-self.n_val :]
+
+                self.train_dataset = MigdogStyleDataset(
+                    train_ids,
+                    style_ids_train,
+                    self.ann_path,
+                    self.data_path,
+                    self.train_transforms,
+                    self.style_train_transforms,
+                    self.n_train_samples,
+                )
+                self.val_dataset = MigdogStyleDataset(
+                    val_ids,
+                    style_ids_val,
+                    self.ann_path,
+                    self.data_path,
+                    self.val_transforms,
+                    self.style_test_transforms,
+                    self.n_val_samples,
+                )
+            else:
+                self.train_dataset = MigdogDataset(
+                    train_ids,
+                    self.ann_path,
+                    self.data_path,
+                    self.train_transforms,
+                    self.n_train_samples,
+                )
+                self.val_dataset = MigdogDataset(
+                    val_ids,
+                    self.ann_path,
+                    self.data_path,
+                    self.val_transforms,
+                    self.n_val_samples,
+                )
 
         elif stage == "test":
             test_ids = all_ids[self.test_scanner][-self.n_val :]
@@ -159,24 +189,44 @@ class MidogDataModule(pl.LightningDataModule):
                 )
 
     def train_dataloader(self):
-        return DataLoader(
-            self.train_dataset,
-            batch_size=self.batch_size,
-            shuffle=True,
-            num_workers=self.workers,
-            pin_memory=True,
-            collate_fn=collate_fn,
-        )
+        if self.style_scanner:
+            return DataLoader(
+                self.train_dataset,
+                batch_size=self.batch_size,
+                shuffle=True,
+                num_workers=self.workers,
+                pin_memory=True,
+                collate_fn=collate_fn_style,
+            )
+        else:
+            return DataLoader(
+                self.train_dataset,
+                batch_size=self.batch_size,
+                shuffle=True,
+                num_workers=self.workers,
+                pin_memory=True,
+                collate_fn=collate_fn,
+            )
 
     def val_dataloader(self):
-        return DataLoader(
-            self.val_dataset,
-            batch_size=self.batch_size,
-            shuffle=False,
-            num_workers=self.workers,
-            pin_memory=True,
-            collate_fn=collate_fn,
-        )
+        if self.style_scanner:
+            return DataLoader(
+                self.val_dataset,
+                batch_size=self.batch_size,
+                shuffle=False,
+                num_workers=self.workers,
+                pin_memory=True,
+                collate_fn=collate_fn_style,
+            )
+        else:
+            return DataLoader(
+                self.val_dataset,
+                batch_size=self.batch_size,
+                shuffle=False,
+                num_workers=self.workers,
+                pin_memory=True,
+                collate_fn=collate_fn,
+            )
 
     def test_dataloader(self):
         if self.style_scanner:
@@ -224,6 +274,22 @@ def collate_fn(batch):
         images,
         targets,
     )
+
+
+def collate_fn_style(batch):
+    images = list()
+    targets = list()
+    style_images = list()
+
+    for b in batch:
+        images.append(b[0])
+        targets.append(b[1])
+        style_images.append(b[2])
+
+    images = torch.stack(images, dim=0)
+    style_images = torch.stack(style_images, dim=0)
+
+    return (images, targets, style_images)
 
 
 class MigdogDataset(data.Dataset):
@@ -343,6 +409,135 @@ class MigdogDataset(data.Dataset):
         return self.n_samples
 
 
+class MigdogStyleDataset(data.Dataset):
+    def __init__(
+        self,
+        ids: List[int],
+        style_ids: List[int],
+        ann_path: str,
+        img_path: str,
+        transforms: Callable,
+        style_transforms: Callable,
+        n_samples: int,
+    ):
+        super().__init__()
+        self.img_path = img_path
+        self.n_samples = n_samples
+
+        # Load annotations
+        self.annotations = self.load_ann(ann_path)
+
+        # Preload images
+        print("Loading images to memory...")
+        self.imgs = {}
+        all_ids = list(set(ids + style_ids))
+        for id in all_ids:
+            file_name = os.path.join(self.img_path, self.annotations["file_name"][id])
+            self.imgs[id] = cv2.imread(file_name)
+        print(f"Loaded {len(self.imgs)} images")
+
+        self.ids = ids
+        self.style_ids = style_ids
+
+        self.transforms = transforms
+        self.style_transforms = style_transforms
+
+    def load_ann(self, ann_path):
+        rows = []
+        with open(ann_path) as f:
+            data = json.load(f)
+
+            for row in data["images"]:
+                file_name = row["file_name"]
+                id = row["id"]
+                width = row["width"]
+                height = row["height"]
+
+                if id in list(range(1, 51)):
+                    scanner = 1
+                elif id in list(range(51, 101)):
+                    scanner = 2
+                elif id in list(range(101, 151)):
+                    scanner = 3
+                else:
+                    scanner = 4
+
+                # Get all boxes and labels for the image
+                boxes = []
+                labels = []
+                for annotation in [
+                    anno for anno in data["annotations"] if anno["image_id"] == id
+                ]:
+                    # Clip negative coordinates to 0
+                    if annotation["bbox"][0] < 0:
+                        annotation["bbox"][0] = 0
+                    if annotation["bbox"][1] < 0:
+                        annotation["bbox"][1] = 0
+
+                    # Clip coordinates > height or width
+                    if annotation["bbox"][2] > width:
+                        annotation["bbox"][2] = width
+                    if annotation["bbox"][3] > height:
+                        annotation["bbox"][3] = height
+
+                    boxes.append(annotation["bbox"])
+                    labels.append(annotation["category_id"])
+
+                rows.append([file_name, id, boxes, labels, scanner, width, height])
+
+        return pd.DataFrame(
+            rows,
+            columns=[
+                "file_name",
+                "id",
+                "boxes",
+                "labels",
+                "scanner",
+                "width",
+                "height",
+            ],
+        ).set_index("id")
+
+    def __getitem__(self, index):
+        # Load annotations
+        id = self.ids[index % len(self.ids)]
+        id_style = self.style_ids[index % len(self.style_ids)]
+        ann = self.annotations.loc[id]
+
+        boxes = ann["boxes"]
+        labels = ann["labels"]  # 0 = positive, 1 = hard negative
+
+        # Load image
+        img = self.imgs[id]
+        img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+
+        style_img = self.imgs[id_style]
+        style_img = cv2.cvtColor(style_img, cv2.COLOR_BGR2RGB)
+
+        # Apply transformations
+        augmented = self.transforms(image=img, bboxes=boxes, class_labels=labels)
+        img = augmented["image"] / 255
+
+        style_img = self.style_transforms(image=style_img)["image"]
+        style_img = style_img / 255
+
+        # Convert targets into correct format
+        if len(augmented["bboxes"]) > 0:
+            boxes = torch.as_tensor(augmented["bboxes"], dtype=torch.float32)
+            labels = torch.tensor(augmented["class_labels"], dtype=torch.int64)
+        else:
+            boxes = torch.zeros((0, 4), dtype=torch.float32)
+            labels = torch.zeros(0, dtype=torch.int64)
+        target = {}
+        target["boxes"] = boxes
+        target["labels"] = labels
+
+        return img, target, style_img
+
+    def __len__(self):
+        return self.n_samples
+
+
 class SimpleDataset(data.Dataset):
     def __init__(self, root: str, ids: List[int], transforms: Callable):
         """Image dataset from directory
@@ -367,11 +562,17 @@ class SimpleDataset(data.Dataset):
 
 
 if __name__ == "__main__":
+    from torchvision.utils import save_image
     from utils import visualize
 
-    # dm = MidogDataModule(crop_size=2000)
-    # dm.setup()
-    # t = dm.train_dataset
+    dm = MidogDataModule(style_scanner=2)
+    dm.setup()
+    t = dm.val_dataset
+    img, tar, style_img = t[999]
+    save_image(img, "1.png")
+    save_image(style_img, "2.png")
+
+    exit()
 
     transforms = A.Compose(
         [
