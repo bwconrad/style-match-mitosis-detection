@@ -64,7 +64,7 @@ class DetectionModel(pl.LightningModule):
 
         if arch == "faster_rcnn":
             self.net = fasterrcnn_resnet50_fpn(
-                pretrained=True, pretrained_backbone=True, min_size=256, max_size=256
+                pretrained=True, pretrained_backbone=True
             )
             in_features = self.net.roi_heads.box_predictor.cls_score.in_features
             head = FastRCNNPredictor(in_features, n_classes + 1)
