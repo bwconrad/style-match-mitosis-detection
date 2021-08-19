@@ -1,8 +1,10 @@
 import os
+from itertools import cycle
 
 import pytorch_lightning as pl
 import torch
 from torch.optim import SGD, Adam, AdamW
+from torch.optim.lr_scheduler import MultiStepLR
 from torchvision.models.detection import fasterrcnn_resnet50_fpn, retinanet_resnet50_fpn
 from torchvision.models.detection.faster_rcnn import FasterRCNN, FastRCNNPredictor
 from torchvision.models.detection.retinanet import RetinaNet, RetinaNetHead
@@ -23,6 +25,9 @@ class DetectionModel(pl.LightningModule):
         lr: float = 1e-3,
         momentum: float = 0.9,
         weight_decay: float = 0.0,
+        schedule: str = 'none',
+        steps: List[int] = [50],
+        gamma: float = 0.1,
         n_samples: int = 10,
         crop_size: int = 256,
         overlap: int = 32,
@@ -40,6 +45,9 @@ class DetectionModel(pl.LightningModule):
             lr: Learning rate
             momentum: Momentum for SGD
             weight_decay: Weight decay
+            schedule: Learning rate schedule (none | step)
+            steps: Step schedule reduction epochs
+            gamma: Step schedule reduction factor
             n_samples: Number of validation samples to save detection visualizations of
             crop_size: Size of image patches
             overlap: Number of overlapping pixels when patching image during testing
@@ -55,6 +63,9 @@ class DetectionModel(pl.LightningModule):
         self.momentum = momentum
         self.optimizer = optimizer
         self.weight_decay = weight_decay
+        self.schedule = schedule
+        self.steps = steps
+        self.gamma = gamma
         self.n_samples = n_samples
         self.crop_size = crop_size
         self.overlap = overlap
@@ -256,35 +267,59 @@ class DetectionModel(pl.LightningModule):
         tensorboard.add_image("val_samples", grid, self.current_epoch + 1)
 
     def test_step(self, batch, batch_idx):
-        if hasattr(self, "style_net") and isinstance(batch, dict):
-            imgs, targets = batch["detection"]
-            # imgs_s = batch["style"].repeat(8, 1, 1, 1)
-            imgs_s = batch["style"]
+        if hasattr(self, "style_net"):
+            imgs, targets, imgs_s = batch
+
+            # Split image into patches
+            patches = split_tiles(
+                imgs,
+                tile_size=list(imgs.shape[-2:]),
+                patch_size=self.crop_size,
+                output_size=self.crop_size,
+                overlap=self.overlap,
+            )
+            patches_s = split_tiles(
+                imgs_s,
+                tile_size=list(imgs_s.shape[-2:]),
+                patch_size=self.crop_size,
+                output_size=self.crop_size,
+                overlap=self.overlap,
+            )
+
+            # Batch the patches
+            split_patches = torch.split(patches.squeeze(0), 8, dim=0)
+            split_patches_s = torch.split(patches_s.squeeze(0), 8, dim=0)[:-1]
+
+            # Pass patchs through model
+            out = []
+            for patch_batch, patch_batch_s in zip(
+                split_patches, cycle(split_patches_s)
+            ):
+                # Apply style transfer
+                if patch_batch.shape[0] != patch_batch_s.shape[0]:
+                    patch_batch_s = patch_batch_s[: patch_batch.shape[0]]
+                patch_batch_st, _, _ = self.style_net(patch_batch, patch_batch_s)
+
+                out.extend(self(patch_batch_st))
+
         else:
             imgs, targets = batch
 
-        # Split image into patches
-        patches = split_tiles(
-            imgs,
-            tile_size=list(imgs.shape[-2:]),
-            patch_size=self.crop_size,
-            output_size=self.crop_size,
-            overlap=self.overlap,
-        )
+            # Split image into patches
+            patches = split_tiles(
+                imgs,
+                tile_size=list(imgs.shape[-2:]),
+                patch_size=self.crop_size,
+                output_size=self.crop_size,
+                overlap=self.overlap,
+            )
 
-        # Batch the patches
-        split_patches = torch.split(patches.squeeze(0), 8, dim=0)
+            # Batch the patches
+            split_patches = torch.split(patches.squeeze(0), 8, dim=0)
 
-        # Pass patch batches through model
-        out = []
-        for patch_batch in split_patches:
-            if hasattr(self, "style_net"):
-                # Apply style transfer
-                if patch_batch.shape[0] != imgs_s.shape[0]:
-                    imgs_s = imgs_s[: patch_batch.shape[0]]
-                patch_batch_s, _, _ = self.style_net(patch_batch, imgs_s)
-                out.extend(self(patch_batch_s))
-            else:
+            # Pass patch batches through model
+            out = []
+            for patch_batch in split_patches:
                 out.extend(self(patch_batch))
 
         # Convert box predictions into correct format for stitching
@@ -458,4 +493,13 @@ class DetectionModel(pl.LightningModule):
         else:
             raise NotImplementedError(f"{self.optimizer} is not an available optimizer")
 
-        return [optimizer]
+        if self.schedule == 'step':
+            scheduler = MultiStepLR(
+                    optimizer,
+                    milestones=self.steps,
+                    gamma=self.gamma,
+            ) 
+
+            return [optimizer], [scheduler]
+        else:
+            return [optimizer]

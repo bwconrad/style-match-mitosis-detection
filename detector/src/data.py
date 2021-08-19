@@ -1,4 +1,5 @@
 import json
+import random
 import os
 from typing import Callable, List
 
@@ -108,16 +109,12 @@ class MidogDataModule(pl.LightningDataModule):
         self.style_train_transforms = A.Compose(
             [A.RandomCrop(crop_size, crop_size), ToTensorV2()]
         )
-        self.style_test_transforms = A.Compose(
+
+        self.style_val_transforms = A.Compose(
             [A.CenterCrop(crop_size, crop_size), ToTensorV2()]
         )
 
-        self.style_transforms = transforms.Compose(
-            [
-                transforms.CenterCrop(crop_size),
-                transforms.ToTensor(),
-            ]
-        )
+        self.style_test_transforms = A.Compose([ToTensorV2()])
 
     def setup(self, stage="fit"):
         all_ids = {
@@ -126,6 +123,7 @@ class MidogDataModule(pl.LightningDataModule):
             3: list(range(101, 151)),
             4: list(range(151, 201)),
         }
+        # self.n_val = 1
 
         if stage == "fit":
             train_ids = all_ids[self.train_scanner][: -self.n_val]
@@ -144,6 +142,7 @@ class MidogDataModule(pl.LightningDataModule):
                     self.train_transforms,
                     self.style_train_transforms,
                     self.n_train_samples,
+                    train=True
                 )
                 self.val_dataset = MigdogStyleDataset(
                     val_ids,
@@ -151,8 +150,9 @@ class MidogDataModule(pl.LightningDataModule):
                     self.ann_path,
                     self.data_path,
                     self.val_transforms,
-                    self.style_test_transforms,
+                    self.style_val_transforms,
                     self.n_val_samples,
+                    train=False
                 )
             else:
                 self.train_dataset = MigdogDataset(
@@ -172,20 +172,27 @@ class MidogDataModule(pl.LightningDataModule):
 
         elif stage == "test":
             test_ids = all_ids[self.test_scanner][-self.n_val :]
-            self.test_dataset = MigdogDataset(
-                test_ids,
-                self.ann_path,
-                self.data_path,
-                self.test_transforms,
-                len(test_ids),
-            )
 
             if self.style_scanner:
-                style_ids = all_ids[self.style_scanner]
-                self.style_dataset = SimpleDataset(
-                    self.data_path,
+                style_ids = all_ids[self.style_scanner][-self.n_val :]
+                self.test_dataset = MigdogStyleDataset(
+                    test_ids,
                     style_ids,
-                    self.style_transforms,
+                    self.ann_path,
+                    self.data_path,
+                    self.test_transforms,
+                    self.style_test_transforms,
+                    len(test_ids),
+                    train=False
+                )
+
+            else:
+                self.test_dataset = MigdogDataset(
+                    test_ids,
+                    self.ann_path,
+                    self.data_path,
+                    self.test_transforms,
+                    len(test_ids),
                 )
 
     def train_dataloader(self):
@@ -230,25 +237,14 @@ class MidogDataModule(pl.LightningDataModule):
 
     def test_dataloader(self):
         if self.style_scanner:
-            loaders = {
-                "detection": DataLoader(
-                    self.test_dataset,
-                    batch_size=1,
-                    shuffle=False,
-                    num_workers=self.workers,
-                    pin_memory=True,
-                    collate_fn=collate_fn,
-                ),
-                "style": DataLoader(
-                    self.style_dataset,
-                    batch_size=8,
-                    shuffle=False,
-                    num_workers=self.workers,
-                    pin_memory=True,
-                ),
-            }
-
-            return CombinedLoader(loaders, "max_size_cycle")
+            return DataLoader(
+                self.test_dataset,
+                batch_size=1,
+                shuffle=False,
+                num_workers=self.workers,
+                pin_memory=True,
+                collate_fn=collate_fn_style,
+            )
         else:
             return DataLoader(
                 self.test_dataset,
@@ -419,10 +415,12 @@ class MigdogStyleDataset(data.Dataset):
         transforms: Callable,
         style_transforms: Callable,
         n_samples: int,
+        train: bool=True,
     ):
         super().__init__()
         self.img_path = img_path
         self.n_samples = n_samples
+        self.train = train
 
         # Load annotations
         self.annotations = self.load_ann(ann_path)
@@ -501,7 +499,11 @@ class MigdogStyleDataset(data.Dataset):
     def __getitem__(self, index):
         # Load annotations
         id = self.ids[index % len(self.ids)]
-        id_style = self.style_ids[index % len(self.style_ids)]
+        if not self.train:
+            id_style = self.style_ids[index % len(self.style_ids)]
+        else:
+            id_style = random.choice(self.style_ids)
+        print(id_style)
         ann = self.annotations.loc[id]
 
         boxes = ann["boxes"]
@@ -567,8 +569,8 @@ if __name__ == "__main__":
 
     dm = MidogDataModule(style_scanner=2)
     dm.setup()
-    t = dm.val_dataset
-    img, tar, style_img = t[999]
+    t = dm.train_dataset
+    img, tar, style_img = t[10]
     save_image(img, "1.png")
     save_image(style_img, "2.png")
 
