@@ -1,5 +1,6 @@
 import os
 from itertools import cycle
+from typing import List
 
 import pytorch_lightning as pl
 import torch
