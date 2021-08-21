@@ -533,7 +533,6 @@ class MigdogStyleDataset(data.Dataset):
             id_style = self.style_ids[index % len(self.style_ids)]
         else:
             id_style = random.choice(self.style_ids)
-        print(id_style)
         ann = self.annotations.loc[id]
 
         boxes = ann["boxes"]
