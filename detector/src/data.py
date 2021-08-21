@@ -1,7 +1,7 @@
 import json
 import random
 import os
-from typing import Callable, List
+from typing import Callable, List, Union
 
 import albumentations as A
 import cv2
@@ -23,10 +23,10 @@ class MidogDataModule(pl.LightningDataModule):
         self,
         data_path: str = "data/midog/",
         ann_path: str = "data/MIDOG.json",
-        train_scanner: int = 1,
-        val_scanner: int = 1,
-        test_scanner: int = 1,
-        style_scanner: int = None,
+        train_scanners: Union[List[int], int] = 1,
+        val_scanners: Union[List[int], int] = 1,
+        test_scanners: Union[List[int], int] = 1,
+        style_scanners: Union[List[int], int] = None,
         n_train_samples: int = 1500,
         n_val_samples: int = 500,
         crop_size: int = 256,
@@ -39,10 +39,10 @@ class MidogDataModule(pl.LightningDataModule):
         Args:
             data_path: Path to image directory
             ann_path: Path to annotation file
-            train_scanner: scanner index of training set
-            val_scanner: scanner index of validation set
-            test_scanner: scanner index of test set
-            test_scanner: scanner index of style image set
+            train_scanners: scanner index of training set
+            val_scanners: scanner index of validation set
+            test_scanners: scanner index of test set
+            style_scanners: scanner index of style image set
             n_train_samples: Number of training samples
             n_val_samples: Number of validation samples
             crop_size: Size of random crop transformation
@@ -53,15 +53,32 @@ class MidogDataModule(pl.LightningDataModule):
         super().__init__()
         self.data_path = data_path
         self.ann_path = ann_path
-        self.train_scanner = train_scanner
-        self.val_scanner = val_scanner
-        self.test_scanner = test_scanner
+        self.train_scanners = train_scanners
+        self.val_scanners = val_scanners
+        self.test_scanners = test_scanners
+        self.style_scanners = style_scanners
         self.n_train_samples = n_train_samples
         self.n_val_samples = n_val_samples
         self.n_val = n_val
         self.batch_size = batch_size
         self.workers = workers
-        self.style_scanner = style_scanner
+
+        if isinstance(train_scanners, int):
+            self.train_scanners = [train_scanners]
+        else:
+            self.train_scanners = train_scanners
+        if isinstance(val_scanners, int):
+            self.val_scanners = [val_scanners]
+        else:
+            self.val_scanners = val_scanners
+        if isinstance(test_scanners, int):
+            self.test_scanners = [test_scanners]
+        else:
+            self.test_scanners = test_scanners
+        if isinstance(style_scanners, int):
+            self.style_scanners = [style_scanners]
+        else:
+            self.style_scanners = style_scanners
 
         self.train_transforms = A.Compose(
             [
@@ -126,13 +143,21 @@ class MidogDataModule(pl.LightningDataModule):
         # self.n_val = 1
 
         if stage == "fit":
-            train_ids = all_ids[self.train_scanner][: -self.n_val]
-            val_ids = all_ids[self.val_scanner][-self.n_val :]
+            train_ids = []
+            val_ids = []
+
+            for s in self.train_scanners:
+                train_ids.extend(all_ids[s][: -self.n_val])
+            for s in self.val_scanners:
+                val_ids.extend(all_ids[s][-self.n_val :])
 
             # Load data
-            if self.style_scanner:
-                style_ids_train = all_ids[self.style_scanner][: -self.n_val]
-                style_ids_val = all_ids[self.style_scanner][-self.n_val :]
+            if self.style_scanners:
+                style_ids_train = []
+                style_ids_val = []
+                for s in self.style_scanners:
+                    style_ids_train .extend(all_ids[s][: -self.n_val])
+                    style_ids_val .extend(all_ids[s][-self.n_val :])
 
                 self.train_dataset = MigdogStyleDataset(
                     train_ids,
@@ -171,10 +196,15 @@ class MidogDataModule(pl.LightningDataModule):
                 )
 
         elif stage == "test":
-            test_ids = all_ids[self.test_scanner][-self.n_val :]
+            test_ids = []
+            for s in self.test_scanners:
+                test_ids.extend(all_ids[s][-self.n_val :])
 
-            if self.style_scanner:
-                style_ids = all_ids[self.style_scanner][-self.n_val :]
+            if self.style_scanners:
+                style_ids = []
+                for s in self.style_scanners:
+                    style_ids.extend(all_ids[s][-self.n_val :])
+
                 self.test_dataset = MigdogStyleDataset(
                     test_ids,
                     style_ids,
@@ -196,7 +226,7 @@ class MidogDataModule(pl.LightningDataModule):
                 )
 
     def train_dataloader(self):
-        if self.style_scanner:
+        if self.style_scanners:
             return DataLoader(
                 self.train_dataset,
                 batch_size=self.batch_size,
@@ -216,7 +246,7 @@ class MidogDataModule(pl.LightningDataModule):
             )
 
     def val_dataloader(self):
-        if self.style_scanner:
+        if self.style_scanners:
             return DataLoader(
                 self.val_dataset,
                 batch_size=self.batch_size,
@@ -236,7 +266,7 @@ class MidogDataModule(pl.LightningDataModule):
             )
 
     def test_dataloader(self):
-        if self.style_scanner:
+        if self.style_scanners:
             return DataLoader(
                 self.test_dataset,
                 batch_size=1,
@@ -567,7 +597,7 @@ if __name__ == "__main__":
     from torchvision.utils import save_image
     from utils import visualize
 
-    dm = MidogDataModule(style_scanner=2)
+    dm = MidogDataModule(style_scanners=2)
     dm.setup()
     t = dm.train_dataset
     img, tar, style_img = t[10]
