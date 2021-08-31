@@ -10,6 +10,154 @@ from torch.utils.data import DataLoader
 from torchvision import transforms
 
 
+class BasicContentStyleDataModule(pl.LightningDataModule):
+    def __init__(
+        self,
+        content_path: str = "data/coco/",
+        style_path: str = "data/wikiart/",
+        resize_size: int = 0,
+        crop_size: int = 256,
+        n_val: int = 5,
+        batch_size: int = 8,
+        workers: int = 4,
+    ):
+        """Content and style image data module
+
+        Args:
+            content_path: Path to content image directory
+            style_path: Path to style image directory
+            resize_size: Size of resize transformation (0 = no resizing)
+            crop_size: Size of random crop transformation
+            n_val: Number of validation samples per scanner
+            batch_size: Number of batch samples
+            workers: Number of data loader workers
+        """
+        super().__init__()
+        self.content_path = content_path
+        self.style_path = style_path
+        self.n_val = n_val
+        self.batch_size = batch_size
+        self.workers = workers
+
+        # No resize before crop
+        if resize_size == 0:
+            self.train_transforms = transforms.Compose(
+                [
+                    transforms.RandomCrop(crop_size),
+                    transforms.RandomHorizontalFlip(),
+                    transforms.ToTensor(),
+                ]
+            )
+            self.val_transforms = transforms.Compose(
+                [
+                    transforms.CenterCrop(crop_size),
+                    transforms.ToTensor(),
+                ]
+            )
+        # Resize before crop
+        else:
+            self.train_transforms = transforms.Compose(
+                [
+                    transforms.Resize(resize_size),
+                    transforms.RandomCrop(crop_size),
+                    transforms.RandomHorizontalFlip(),
+                    transforms.ToTensor(),
+                ]
+            )
+            self.val_transforms = transforms.Compose(
+                [
+                    transforms.Resize(resize_size),
+                    transforms.CenterCrop(crop_size),
+                    transforms.ToTensor(),
+                ]
+            )
+
+    def setup(self, stage="fit"):
+        if stage == "fit":
+            # Load content and style images
+            content_dataset = SimpleDataset(
+                self.content_path, self.train_transforms
+            )
+            style_dataset = SimpleDataset(
+                self.style_path, self.train_transforms
+            )
+
+            self.content_train, self.content_val = data.random_split(
+                content_dataset, [len(content_dataset) - self.n_val, self.n_val]
+            )
+            self.style_train, self.style_val = data.random_split(
+                style_dataset, [len(style_dataset) - self.n_val, self.n_val]
+            )
+            
+        elif stage == "test":
+            raise NotImplementedError("")
+
+    def train_dataloader(self):
+        loaders = {
+            "content": DataLoader(
+                self.content_train,
+                batch_size=self.batch_size,
+                shuffle=True,
+                num_workers=self.workers,
+                pin_memory=True,
+                drop_last=True,
+            ),
+            "style": DataLoader(
+                self.style_train,
+                batch_size=self.batch_size,
+                shuffle=True,
+                num_workers=self.workers,
+                pin_memory=True,
+                drop_last=True,
+            ),
+        }
+
+        return CombinedLoader(loaders, "max_size_cycle")
+
+    def val_dataloader(self):
+        loaders = {
+            "content": DataLoader(
+                self.content_val,
+                batch_size=1,
+                shuffle=False,
+                num_workers=self.workers,
+                pin_memory=True,
+                drop_last=True,
+            ),
+            "style": DataLoader(
+                self.style_val,
+                batch_size=1,
+                shuffle=False,
+                num_workers=self.workers,
+                pin_memory=True,
+                drop_last=True,
+            ),
+        }
+
+        return CombinedLoader(loaders, "max_size_cycle")
+
+    def test_dataloader(self):
+        loaders = {
+            "content": DataLoader(
+                self.content_test,
+                batch_size=1,
+                shuffle=False,
+                num_workers=self.workers,
+                pin_memory=True,
+                drop_last=True,
+            ),
+            "style": DataLoader(
+                self.style_test,
+                batch_size=1,
+                shuffle=False,
+                num_workers=self.workers,
+                pin_memory=True,
+                drop_last=True,
+            ),
+        }
+
+        return CombinedLoader(loaders, "max_size_cycle")
+
 class ContentStyleDataModule(pl.LightningDataModule):
     def __init__(
         self,
@@ -105,28 +253,33 @@ class ContentStyleDataModule(pl.LightningDataModule):
                 val_style_ids.extend(all_ids[s][-self.n_val :])
 
             # Load content and style images
-            self.content_train = SimpleDataset(
+            self.content_train = SimpleScannerDataset(
                 self.data_path, train_content_ids, self.train_transforms
             )
-            self.content_val = SimpleDataset(
+            self.content_val = SimpleScannerDataset(
                 self.data_path, val_content_ids, self.val_transforms
             )
-            self.style_train = SimpleDataset(
+            self.style_train = SimpleScannerDataset(
                 self.data_path, train_style_ids, self.train_transforms
             )
-            self.style_val = SimpleDataset(
+            self.style_val = SimpleScannerDataset(
                 self.data_path, val_style_ids, self.val_transforms
             )
         elif stage == "test":
             # Calculate number of images
-            content_ids = all_ids[self.content_scanner][-self.n_val :]
-            style_ids = all_ids[self.style_scanner][-self.n_val :]
+            content_ids = []
+            style_ids = []
+
+            for s in self.content_scanners:
+                content_ids.extend(all_ids[s][-self.n_val :])
+            for s in self.style_scanners:
+                style_ids.extend(all_ids[s][-self.n_val :])
 
             # Load content and style images
-            self.content_test = SimpleDataset(
+            self.content_test = SimpleScannerDataset(
                 self.data_path, content_ids, self.val_transforms
             )
-            self.style_test = SimpleDataset(
+            self.style_test = SimpleScannerDataset(
                 self.data_path, style_ids, self.val_transforms
             )
 
@@ -197,7 +350,7 @@ class ContentStyleDataModule(pl.LightningDataModule):
         return CombinedLoader(loaders, "max_size_cycle")
 
 
-class SimpleDataset(data.Dataset):
+class SimpleScannerDataset(data.Dataset):
     def __init__(
         self, root: str, ids: List[int], transforms: Callable, preload: bool = False
     ):
@@ -236,6 +389,26 @@ class SimpleDataset(data.Dataset):
         return len(self.paths)
 
 
+class SimpleDataset(data.Dataset):
+    def __init__(self, root: str, transforms: Callable):
+        """Image dataset from directory
+        Args:
+            root: Path to directory
+            transforms: Image augmentations
+        """
+        super().__init__()
+        self.root = root
+        self.paths = os.listdir(root)
+        self.transforms = transforms
+
+    def __getitem__(self, index):
+        img = Image.open(os.path.join(self.root, self.paths[index])).convert("RGB")
+        img = self.transforms(img)
+        return img
+
+    def __len__(self):
+        return len(self.paths)
+
 if __name__ == "__main__":
-    d = SimpleDataset("data/midog/", [5, 2, 7], type)
+    d = SimpleScannerDataset("data/midog/", [5, 2, 7], type)
     print(d[0])

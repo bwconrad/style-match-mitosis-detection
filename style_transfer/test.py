@@ -10,7 +10,6 @@ from src.model import AdaInModel
 parser = LightningArgumentParser()
 parser.add_lightning_class_args(pl.Trainer, None)
 parser.add_lightning_class_args(ContentStyleDataModule, "data")
-parser.add_argument("--test", action="store_true", help="Perform model evaluation.")
 parser.add_argument(
     "--checkpoint", type=str, help="Checkpoint to test on", required=True
 )
