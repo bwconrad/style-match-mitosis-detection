@@ -1,7 +1,6 @@
 import os
 from typing import Callable, List, Union
 
-import numpy as np
 import pytorch_lightning as pl
 import torch.utils.data as data
 from PIL import Image
@@ -137,28 +136,29 @@ class BasicContentStyleDataModule(pl.LightningDataModule):
         return CombinedLoader(loaders, "max_size_cycle")
 
     def test_dataloader(self):
-        loaders = {
-            "content": DataLoader(
-                self.content_test,
-                batch_size=1,
-                shuffle=False,
-                num_workers=self.workers,
-                pin_memory=True,
-                drop_last=True,
-            ),
-            "style": DataLoader(
-                self.style_test,
-                batch_size=1,
-                shuffle=False,
-                num_workers=self.workers,
-                pin_memory=True,
-                drop_last=True,
-            ),
-        }
+        # loaders = {
+        #     "content": DataLoader(
+        #         self.content_test,
+        #         batch_size=1,
+        #         shuffle=False,
+        #         num_workers=self.workers,
+        #         pin_memory=True,
+        #         drop_last=True,
+        #     ),
+        #     "style": DataLoader(
+        #         self.style_test,
+        #         batch_size=1,
+        #         shuffle=False,
+        #         num_workers=self.workers,
+        #         pin_memory=True,
+        #         drop_last=True,
+        #     ),
+        # }
 
-        return CombinedLoader(loaders, "max_size_cycle")
+        # return CombinedLoader(loaders, "max_size_cycle")
+        raise NotImplementedError("")
 
-class ContentStyleDataModule(pl.LightningDataModule):
+class ScannerContentStyleDataModule(pl.LightningDataModule):
     def __init__(
         self,
         data_path: str = "data/midog/",
@@ -352,7 +352,7 @@ class ContentStyleDataModule(pl.LightningDataModule):
 
 class SimpleScannerDataset(data.Dataset):
     def __init__(
-        self, root: str, ids: List[int], transforms: Callable, preload: bool = False
+        self, root: str, ids: List[int], transforms: Callable, preload: bool = True
     ):
         """Image dataset from directory
 
