@@ -352,7 +352,7 @@ class ScannerContentStyleDataModule(pl.LightningDataModule):
 
 class SimpleScannerDataset(data.Dataset):
     def __init__(
-        self, root: str, ids: List[int], transforms: Callable, preload: bool = True
+        self, root: str, ids: List[int], transforms: Callable, preload: bool = False
     ):
         """Image dataset from directory
 
@@ -410,5 +410,18 @@ class SimpleDataset(data.Dataset):
         return len(self.paths)
 
 if __name__ == "__main__":
-    d = SimpleScannerDataset("data/midog/", [5, 2, 7], type)
-    print(d[0])
+    t = transforms.Compose(
+                [
+                    transforms.RandomCrop(256),
+                    transforms.RandomHorizontalFlip(),
+                    transforms.ToTensor(),
+                ]
+            )
+    d = SimpleScannerDataset("data/normalized/", list(range(1,201)), t)
+    import time
+    start = time.time()
+    for ind, i in enumerate(range(len(d))):
+        d[i]
+        print(ind)
+
+    print(time.time() - start)
