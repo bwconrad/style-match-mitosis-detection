@@ -6,9 +6,10 @@ import pytorch_lightning as pl
 import torch
 from torch.optim import SGD, Adam, AdamW
 from torch.optim.lr_scheduler import MultiStepLR
-from torchvision.models.detection import fasterrcnn_resnet50_fpn, retinanet_resnet50_fpn
-from torchvision.models.detection.faster_rcnn import FasterRCNN, FastRCNNPredictor
-from torchvision.models.detection.retinanet import RetinaNet, RetinaNetHead
+from torchvision.models.detection import (fasterrcnn_resnet50_fpn,
+                                          retinanet_resnet50_fpn)
+from torchvision.models.detection.faster_rcnn import FastRCNNPredictor
+from torchvision.models.detection.retinanet import RetinaNetHead
 from torchvision.ops import nms
 from torchvision.utils import make_grid, save_image
 
