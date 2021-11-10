@@ -132,6 +132,10 @@ class MidogDataModule(pl.LightningDataModule):
         self.style_val_transforms = A.Compose(
             [A.CenterCrop(crop_size, crop_size), ToTensorV2()]
         )
+        self.style_rand_transforms = A.Compose(
+            [A.Resize(crop_size, crop_size), ToTensorV2()]
+        )
+
 
         self.style_test_transforms = A.Compose([ToTensorV2()])
 
@@ -188,7 +192,7 @@ class MidogDataModule(pl.LightningDataModule):
                     self.data_path,
                     self.random_style_path,
                     self.train_transforms,
-                    self.style_train_transforms,
+                    self.style_rand_transforms,
                     self.n_train_samples,
                     train=True
                 )
@@ -198,7 +202,7 @@ class MidogDataModule(pl.LightningDataModule):
                     self.data_path,
                     self.random_style_path,
                     self.val_transforms,
-                    self.style_val_transforms,
+                    self.style_rand_transforms,
                     self.n_val_samples,
                     train=False
                 )
@@ -238,7 +242,17 @@ class MidogDataModule(pl.LightningDataModule):
                     len(test_ids),
                     train=False
                 )
-
+            elif self.random_style_path:
+                self.test_dataset = MigdogRandomStyleDataset(
+                    test_ids,
+                    self.ann_path,
+                    self.data_path,
+                    self.random_style_path,
+                    self.val_transforms,
+                    self.style_rand_transforms,
+                    self.n_val_samples,
+                    train=False
+                )
             else:
                 self.test_dataset = MigdogDataset(
                     test_ids,
