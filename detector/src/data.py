@@ -146,7 +146,6 @@ class MidogDataModule(pl.LightningDataModule):
             3: list(range(101, 151)),
             4: list(range(151, 201)),
         }
-        # self.n_val = 1
 
         if stage == "fit":
             train_ids = []
@@ -703,7 +702,7 @@ class MigdogRandomStyleDataset(data.Dataset):
         if not self.train:
             idx_style = index % len(self.style_files)
         else:
-            idx_style = random.randint(0, len(self.style_files))
+            idx_style = random.randint(0, len(self.style_files)-1)
         ann = self.annotations.loc[id]
 
         boxes = ann["boxes"]
