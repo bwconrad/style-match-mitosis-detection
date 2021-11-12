@@ -247,9 +247,9 @@ class MidogDataModule(pl.LightningDataModule):
                     self.ann_path,
                     self.data_path,
                     self.random_style_path,
-                    self.val_transforms,
-                    self.style_rand_transforms,
-                    self.n_val_samples,
+                    self.test_transforms,
+                    self.style_test_transforms,
+                    len(test_ids),
                     train=False
                 )
             else:
