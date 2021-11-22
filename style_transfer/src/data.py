@@ -292,6 +292,7 @@ class ScannerContentStyleDataModule(pl.LightningDataModule):
                 num_workers=self.workers,
                 pin_memory=True,
                 drop_last=True,
+                persistent_workers=True
             ),
             "style": DataLoader(
                 self.style_train,
@@ -300,6 +301,7 @@ class ScannerContentStyleDataModule(pl.LightningDataModule):
                 num_workers=self.workers,
                 pin_memory=True,
                 drop_last=True,
+                persistent_workers=True
             ),
         }
 
@@ -314,6 +316,7 @@ class ScannerContentStyleDataModule(pl.LightningDataModule):
                 num_workers=self.workers,
                 pin_memory=True,
                 drop_last=True,
+                persistent_workers=True
             ),
             "style": DataLoader(
                 self.style_val,
@@ -322,6 +325,7 @@ class ScannerContentStyleDataModule(pl.LightningDataModule):
                 num_workers=self.workers,
                 pin_memory=True,
                 drop_last=True,
+                persistent_workers=True
             ),
         }
 
@@ -336,6 +340,7 @@ class ScannerContentStyleDataModule(pl.LightningDataModule):
                 num_workers=self.workers,
                 pin_memory=True,
                 drop_last=True,
+                persistent_workers=True
             ),
             "style": DataLoader(
                 self.style_test,
@@ -344,6 +349,7 @@ class ScannerContentStyleDataModule(pl.LightningDataModule):
                 num_workers=self.workers,
                 pin_memory=True,
                 drop_last=True,
+                persistent_workers=True
             ),
         }
 
