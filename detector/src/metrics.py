@@ -1,6 +1,7 @@
 from collections import Counter
 
 import torch
+import numpy as np
 
 
 def iou_and_acc(pred_boxes, true_boxes, iou_threshold=0.5, box_format="corners"):
@@ -65,6 +66,9 @@ def mean_average_precision(
 
     # list storing all AP for respective classes
     average_precisions = []
+    precs = []
+    recs = []
+    f1s = []
 
     # used for numerical stability later on
     epsilon = 1e-6
@@ -121,7 +125,7 @@ def mean_average_precision(
                 iou = intersection_over_union(
                     torch.tensor(detection[3:]),
                     torch.tensor(gt[3:]),
-                    box_format=box_format,
+                   box_format=box_format,
                 )
 
                 if iou > best_iou:
@@ -147,13 +151,21 @@ def mean_average_precision(
         precisions = TP_cumsum / (TP_cumsum + FP_cumsum + epsilon)
         precisions = torch.cat((torch.tensor([1]), precisions))
         recalls = torch.cat((torch.tensor([0]), recalls))
+
         # torch.trapz for numerical integration
         average_precisions.append(torch.trapz(precisions, recalls))
 
+        # Precision, recall, F1
+        p = torch.sum(TP, dim=0) / (torch.sum(TP, dim=0) + torch.sum(FP, dim=0) + epsilon)
+        precs.append(p)
+        r = torch.sum(TP) / (total_true_bboxes + epsilon) 
+        recs.append(r)
+        f1s.append((2*p*r) / (p+r+epsilon))
+
     if len(average_precisions) == 0:
-        return torch.tensor(0.0)
+        return torch.tensor(0.0), torch.tensor(0.0), torch.tensor(0.0), torch.tensor(0.0)
     else:
-        return sum(average_precisions) / len(average_precisions)
+        return sum(average_precisions) / len(average_precisions), torch.tensor(np.mean(precs)), torch.tensor(np.mean(recs)), torch.tensor(np.mean(f1s))
 
 
 def intersection_over_union(boxes_preds, boxes_labels, box_format="midpoint"):
@@ -206,6 +218,6 @@ def intersection_over_union(boxes_preds, boxes_labels, box_format="midpoint"):
 if __name__ == "__main__":
     # [train_idx, class_prediction, prob_score, x1, y1, x2, y2]
 
-    gt = [[1, 1, 1, 100, 100, 300, 200], [1, 2, 1, 500, 500, 1000, 1000]]
-    pred = [[1, 0, 1, 100, 100, 200, 200], [1, 1, 1, 100, 100, 150, 200]]
-    print(iou_and_acc(pred, gt))
+    gt = [[1, 1, 1, 100, 100, 300, 200], [1, 1, 1, 500, 500, 1000, 1000]]
+    pred = [[1, 1, 1, 100, 100, 300, 200], [1, 1, 1, 100, 100, 150, 200]]
+    print(mean_average_precision(pred, gt)) 

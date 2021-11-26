@@ -106,7 +106,7 @@ class DetectionModel(pl.LightningModule):
         else:
             imgs, targets = batch
 
-        # Pass through model
+        # Pass though model
         loss_dict = self.net(imgs, targets)
         loss = sum(loss_dict.values())
 
@@ -195,7 +195,7 @@ class DetectionModel(pl.LightningModule):
                     )
 
                 # Calculate metrics
-                map.append(mean_average_precision(pred, gt))
+                map.append(mean_average_precision(pred, gt)[0])
                 iou, acc = iou_and_acc(pred, gt)
                 ious.append(iou)
                 accs.append(acc)
@@ -422,7 +422,7 @@ class DetectionModel(pl.LightningModule):
                 )
 
             # Calculate metrics
-            map = mean_average_precision(pred, gt)
+            map, precision, recall, f1 = mean_average_precision(pred, gt)
             iou, acc = iou_and_acc(pred, gt)
 
             # Log
@@ -430,12 +430,18 @@ class DetectionModel(pl.LightningModule):
             results["test_map"] = map
             results["test_iou"] = iou
             results["test_acc"] = acc
+            results["test_pre"] = precision
+            results["test_rec"] = recall
+            results["test_f1"] = f1
 
         else:
             results = {}
             results["test_map"] = None
             results["test_iou"] = None
             results["test_acc"] = None
+            results["test_pre"] = None
+            results["test_rec"] = None
+            results["test_f1"] = None
 
         # Save some samples detection results
         sample_out = {}
@@ -474,7 +480,16 @@ class DetectionModel(pl.LightningModule):
         avg_acc = torch.stack(
             [x["test_acc"] for x in outputs if x["test_acc"] is not None]
         ).mean()
-        print(f"\nTest MAP: {avg_map} IOU: {avg_iou} Acc: {avg_acc}")
+        avg_pre = torch.stack(
+            [x["test_pre"] for x in outputs if x["test_pre"] is not None]
+        ).mean()
+        avg_rec = torch.stack(
+            [x["test_rec"] for x in outputs if x["test_rec"] is not None]
+        ).mean()
+        avg_f1 = torch.stack(
+            [x["test_f1"] for x in outputs if x["test_f1"] is not None]
+        ).mean()
+        print(f"\nTest MAP: {avg_map} IOU: {avg_iou} Acc: {avg_acc}, Precision: {avg_pre}, Recall: {avg_rec}, F1: {avg_f1}")
 
     def configure_optimizers(self):
         if self.optimizer == "sgd":
