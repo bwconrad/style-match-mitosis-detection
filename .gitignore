@@ -1,7 +1,6 @@
 *__pycache__/
 *.ipynb_checkpoints/
-*/data/
-*/output/
-*/forben/
-*/weights/
-t.py
+data/
+output/
+weights/
+_ignore/
