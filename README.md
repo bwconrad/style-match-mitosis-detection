@@ -1,4 +1,4 @@
-# Style Match for Mitotic Figure Detection
+# Style Match for Mitosis Detection
 Repository for "Style Match: Reducing the Scanner Induced Domain Gap in Mitosis Detection using Style Transfer Alignment".
 
 <p align="center">
