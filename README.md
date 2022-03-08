@@ -1,17 +1,32 @@
-# Style Match for Mitosis Figure Detection
+# Style Match for Mitotic Figure Detection
+Repository for "Style Match: Reducing the Scanner Induced Domain Gap in Mitosis Detection using Style Transfer Alignment".
+
+<p align="center">
+<img src="assets/style-match.png" width="60%" style={text-align: center;}/>
+<br>
+<p align="center">
+<img src="assets/samples.png" width="90%"/>
+</p>
 
 ## Setup
-1. Run `pip install -r requirements.txt`.
-2. Download the [MIDOG 2021 dataset](https://zenodo.org/record/4643381).
-3. Optionally for STRAP, download the [WikiArt](https://github.com/cs-chan/ArtGAN/tree/master/WikiArt%20Dataset) and [COCO 2014 train](https://cocodataset.org/#download) datasets.
+### Requirements
+- Python >= 3.8
+- `pip install -r requirements.txt`.
 
-- Pretrained weights can be downloaded [here](https://drive.google.com/drive/folders/1t4e3AMhkeabucJ49arcuQSB80zOdmi0R?usp=sharing).
+### Data
+- [MIDOG 2021 dataset](https://zenodo.org/record/4643381).
+    - To apply stain normalization to the dataset run `python scripts/stain_normalization -i data/midog -o data/normalizaed.`
+- Optionally for STRAP, [WikiArt](https://github.com/cs-chan/ArtGAN/tree/master/WikiArt%20Dataset) and [COCO 2014 train](https://cocodataset.org/#download) datasets.
 
-## Style Transfer Ablation Notebook
-- `notebooks/style_transfer_inference.ipynb` provides a demo of the style transfer model qualitative ablation study.
-- Model weights used in the notebook can be downloaded [here](https://drive.google.com/drive/folders/1t4e3AMhkeabucJ49arcuQSB80zOdmi0R?usp=sharing).
+
 
 ## Usage
+- __Pretrained weights can be downloaded [here](https://drive.google.com/drive/folders/1t4e3AMhkeabucJ49arcuQSB80zOdmi0R?usp=sharing).__
+
+### Style Transfer Demo Notebook
+- `notebooks/style_transfer_inference.ipynb` provides a demo of the style transfer model applied to WSIs.
+- To run it, download the [ pretrained weights ](https://drive.google.com/drive/folders/1t4e3AMhkeabucJ49arcuQSB80zOdmi0R?usp=sharing) and [ MIDOG dataset ](https://zenodo.org/record/4643381).
+
 ### Style Transfer
 - __Train__:
     - Content images from scanner 1 and style images from scanner 4: 
@@ -92,7 +107,7 @@
     --model.style_checkpoint weights/random_style.ckpt
     ```
     - Stain Normalization: 
-        - Apply stain normalization to the MIDOG dataset set by running `python scripts/stain_normalization -i data/midog -o data/normalizaed`.
+        - Apply stain normalization to the MIDOG dataset set by first running `python scripts/stain_normalization -i data/midog -o data/normalizaed`.
     ```
     python train_detector.py --gpus 1 --precision 16 --max_epochs 100 --model.schedule step \
     --model.steps "[50]" --data.data_path data/normalized --data.ann_path data/MIDOG.json \
