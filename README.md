@@ -1,5 +1,5 @@
-# Style Match for Mitosis Detection
-Repository for "Style Match: Reducing the Scanner Induced Domain Gap in Mitosis Detection using Style Transfer Alignment".
+# Style Match for Mitotic Figure Detection
+Repository for "[Style Match: Reducing the Scanner Induced Domain Gap in Mitosis Detection using Style Transfer Alignment](assets/style_match_conrad22.pdf)".
 
 <p align="center">
 <img src="assets/style-match.png" width="60%" style={text-align: center;}/>
@@ -11,7 +11,7 @@ Repository for "Style Match: Reducing the Scanner Induced Domain Gap in Mitosis 
 ## Setup
 ### Requirements
 - Python >= 3.8
-- `pip install -r requirements.txt`.
+- `pip install -r requirements.txt`
 
 ### Data
 - [MIDOG 2021 dataset](https://zenodo.org/record/4643381).
